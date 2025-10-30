@@ -328,14 +328,6 @@ docker system df
 
 ---
 
-## 🙏 **Acknowledgments**
-
-- **Joint Venturers Team**: For developing the Praiser application framework
-- **Research Community**: For establishing weather-arthritis correlations
-- **Open Source Libraries**: FastAPI, scikit-learn, NumPy, pandas
-- **Docker Community**: For containerization best practices
-
----
 
 ## 📈 **Roadmap**
 
@@ -352,5 +344,3 @@ docker system df
 - [ ] Clinical trial support tools
 
 ---
-
-**🏥 Built for healthcare professionals and RA patients worldwide** | **Made with ❤️ by the Joint Venturers team**
