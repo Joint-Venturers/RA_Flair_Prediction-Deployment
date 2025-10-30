@@ -1,4 +1,4 @@
-# RA Flare Prediction API
+# RA Flare Prediction Deployment
 
 🏥 **AI-powered 24-hour rheumatoid arthritis flare prediction system**
 
