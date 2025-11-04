@@ -1,40 +1,41 @@
-# Use Python 3.11 with Alpine Linux
-FROM python:3.11-alpine
+# Dockerfile for Enhanced RA Flare Prediction System
 
-# Install system dependencies for building Python packages
-RUN apk add --no-cache \
+FROM python:3.9-slim
+
+# Set working directory
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
     gcc \
-    musl-dev \
-    linux-headers \
     g++ \
-    gfortran \
-    openblas-dev \
-    lapack-dev
+    && rm -rf /var/lib/apt/lists/*
 
-# Create working directory
-WORKDIR /code
-
-# Upgrade pip and install build tools
-RUN pip install --upgrade pip setuptools wheel
-
-# Copy requirements first for better caching
-COPY requirements.txt .
+# Copy requirements first for better Docker layer caching
+COPY requirements_enhanced.txt .
 
 # Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements_enhanced.txt
 
-# Copy the application
-COPY app/ ./app/
+# Copy application files
+COPY . .
 
-# Expose the port
+# Create necessary directories
+RUN mkdir -p data models reports
+
+# Run training pipeline to generate models (optional - can be done externally)
+# RUN python enhanced_train_ra_model.py
+
+# Expose port
 EXPOSE 8000
 
 # Set environment variables
-ENV PYTHONPATH=/code
+ENV PYTHONPATH=/app
+ENV PYTHONUNBUFFERED=1
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=30s --start-period=5s --retries=3 \
-  CMD wget --no-verbose --tries=1 --spider http://localhost:8000/health || exit 1
+    CMD curl -f http://localhost:8000/health || exit 1
 
 # Run the application
-CMD ["uvicorn", "app.server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "enhanced_server:app", "--host", "0.0.0.0", "--port", "8000"]
