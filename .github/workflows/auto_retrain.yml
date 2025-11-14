@@ -1,0 +1,89 @@
+name: Automated ML Retraining
+
+on:
+  # Manual trigger
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force retrain regardless of triggers'
+        required: false
+        default: 'false'
+  
+  # Scheduled trigger (every hour)
+  schedule:
+    - cron: '0 * * * *'  # Every hour
+  
+  # Trigger when data is pushed to dev
+  push:
+    branches:
+      - dev
+    paths:
+      - 'ra_data_simple.csv'
+      - 'data/**/*.csv'
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout dev branch
+        uses: actions/checkout@v3
+        with:
+          ref: dev
+          fetch-depth: 0
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn joblib
+      
+      - name: Check triggers and run pipeline
+        run: |
+          if [ "${{ github.event.inputs.force }}" = "true" ]; then
+            echo "Force retraining enabled"
+            python auto_pipeline.py --force
+          else
+            echo "Checking triggers"
+            python auto_pipeline.py
+          fi
+      
+      - name: Check if model updated
+        id: check_changes
+        run: |
+          if git diff --quiet HEAD -- *.pkl training_metadata.json; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Commit and push if changed
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add *.pkl training_metadata.json
+          git commit -m "🤖 Auto-update: Model retrained - $(date +'%Y-%m-%d %H:%M')"
+          git push origin dev
+      
+      - name: Trigger Render deployment
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          echo "✅ Model updated on dev branch"
+          echo "🚀 Render will auto-deploy from dev branch"
+      
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: pipeline-logs
+          path: auto_pipeline.log
+      
+      - name: Notify on failure
+        if: failure()
+        run: |
+          echo "❌ Pipeline failed - check logs in Actions artifacts"
