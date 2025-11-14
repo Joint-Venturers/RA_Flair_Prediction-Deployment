@@ -1,0 +1,16 @@
+{
+  "triggers": {
+    "min_new_samples": 100,
+    "min_days_since_last_train": 7,
+    "accuracy_threshold": 0.80,
+    "min_improvement": 0.01
+  },
+  "validation": {
+    "test_size": 0.2,
+    "min_accuracy": 0.80,
+    "min_auc": 0.85
+  },
+  "github": {
+    "branch": "dev"
+  }
+}
