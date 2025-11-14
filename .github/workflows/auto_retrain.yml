@@ -16,7 +16,7 @@ on:
   # Trigger when data is pushed to dev
   push:
     branches:
-      - dev
+      - main
     paths:
       - 'ra_data_simple.csv'
       - 'data/**/*.csv'
@@ -26,10 +26,10 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout dev branch
+      - name: Checkout main branch
         uses: actions/checkout@v3
         with:
-          ref: dev
+          ref: main
           fetch-depth: 0
       
       - name: Set up Python
@@ -68,7 +68,7 @@ jobs:
           git config --local user.name "github-actions[bot]"
           git add *.pkl training_metadata.json
           git commit -m "🤖 Auto-update: Model retrained - $(date +'%Y-%m-%d %H:%M')"
-          git push origin dev
+          git push origin main
       
       - name: Trigger Render deployment
         if: steps.check_changes.outputs.changed == 'true'
