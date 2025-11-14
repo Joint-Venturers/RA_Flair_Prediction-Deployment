@@ -13,7 +13,7 @@ on:
   schedule:
     - cron: '0 * * * *'  # Every hour
   
-  # Trigger when data is pushed to dev
+  # Trigger when data is pushed to main
   push:
     branches:
       - main
@@ -73,8 +73,8 @@ jobs:
       - name: Trigger Render deployment
         if: steps.check_changes.outputs.changed == 'true'
         run: |
-          echo "✅ Model updated on dev branch"
-          echo "🚀 Render will auto-deploy from dev branch"
+          echo "✅ Model updated on main branch"
+          echo "🚀 Render will auto-deploy from main branch"
       
       - name: Upload logs
         if: always()
