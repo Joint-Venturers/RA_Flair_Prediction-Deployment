@@ -1,0 +1,24 @@
+{
+  "timestamp": "2025-11-16T01:09:37.599197",
+  "accuracy": 0.54,
+  "f1": 0.4556213017751479,
+  "auc": 0.5237664556325997,
+  "training_samples": 1600,
+  "test_samples": 400,
+  "total_samples": 2000,
+  "features": [
+    "age",
+    "gender",
+    "disease_duration",
+    "bmi",
+    "min_temperature",
+    "max_temperature",
+    "humidity",
+    "barometric_pressure",
+    "precipitation",
+    "wind_speed",
+    "tender_joint_count",
+    "swollen_joint_count"
+  ],
+  "branch": "main"
+}
