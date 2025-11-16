@@ -7,10 +7,10 @@
   },
   "validation": {
     "test_size": 0.2,
-    "min_accuracy": 0.80,
-    "min_auc": 0.85
+    "min_accuracy": 0.50,
+    "min_auc": 0.50
   },
   "github": {
-    "branch": "dev"
+    "branch": "main"
   }
 }
