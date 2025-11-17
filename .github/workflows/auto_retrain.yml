@@ -56,6 +56,15 @@ jobs:
             echo "Checking triggers"
             python auto_pipeline.py
           fi
+
+      - name: Save analytics to Supabase
+        if: steps.check_changes.outputs.changed == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          python save_analytics.py
+
       
       - name: Check if model updated
         id: check_changes
