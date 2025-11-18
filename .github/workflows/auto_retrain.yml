@@ -83,6 +83,16 @@ jobs:
           git add *.pkl training_metadata.json
           git commit -m "🤖 Auto-update: Model retrained - $(date +'%Y-%m-%d %H:%M')"
           git push origin main
+
+      - name: Save analytics to Supabase
+        if: steps.check_changes.outputs.changed == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          pip install requests python-dotenv
+          python save_analytics_rest.py
+
       
       - name: Trigger Render deployment
         if: steps.check_changes.outputs.changed == 'true'
