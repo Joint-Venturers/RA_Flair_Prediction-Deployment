@@ -1,0 +1,76 @@
+2025-11-19 18:06:36,315 - INFO - ============================================================
+2025-11-19 18:06:36,316 - INFO - ============================================================
+2025-11-19 18:06:36,319 - INFO - 
+============================================================
+2025-11-19 18:06:36,320 - INFO - ============================================================
+2025-11-19 18:06:36,340 - INFO -   Should retrain: True
+2025-11-19 18:06:36,340 - INFO -   Triggers:
+2025-11-19 18:06:36,340 - INFO -     - New data: 3000 samples (>= 50)
+2025-11-19 18:06:36,344 - INFO -   Training samples: 2400
+2025-11-19 18:06:36,345 - INFO -   Test samples:     600
+2025-11-19 18:06:36,939 - INFO -   Accuracy: 0.8450
+2025-11-19 18:06:36,939 - INFO -   F1 Score: 0.7947
+2025-11-19 18:06:36,939 - INFO -   AUC:      0.9345
+2025-11-19 18:06:36,941 - INFO -   1. sleep_hours               0.1635
+2025-11-19 18:06:36,941 - INFO -   2. current_pain_score        0.1291
+2025-11-19 18:06:36,941 - INFO -   3. bmi                       0.1108
+2025-11-19 18:06:36,942 - INFO -   4. swollen_joint_count       0.0963
+2025-11-19 18:06:36,942 - INFO -   5. disease_duration          0.0883
+2025-11-19 18:06:36,943 - INFO -   Valid: False
+2025-11-19 18:06:36,944 - WARNING -   Reasons:
+2025-11-19 18:06:36,944 - WARNING -     - Improvement 0.0000 < minimum 0.01
+2025-11-19 18:21:12,298 - INFO - [OK] Loaded config from pipeline_config.json
+2025-11-19 18:21:12,298 - INFO - ============================================================
+2025-11-19 18:21:12,298 - INFO - [RA] Enhanced RA Flare Prediction Pipeline
+2025-11-19 18:21:12,298 - INFO - ============================================================
+2025-11-19 18:21:12,298 - INFO - [DATA] Features: 16
+2025-11-19 18:21:12,298 - INFO - [FILE] Data file: ra_data_enhanced.csv
+2025-11-19 18:21:12,299 - INFO - 
+============================================================
+2025-11-19 18:21:12,299 - INFO - [START] Pipeline Started: 2025-11-19T18:21:12.299427
+2025-11-19 18:21:12,299 - INFO - ============================================================
+2025-11-19 18:21:12,303 - INFO - [OK] Loaded 3000 samples from ra_data_enhanced.csv
+2025-11-19 18:21:12,304 - INFO - [DATA] Flare rate: 39.8%
+2025-11-19 18:21:12,304 - INFO - [INFO] Previous model: accuracy=0.8450
+2025-11-19 18:21:12,304 - INFO - 
+[CHECK] Retraining Check:
+2025-11-19 18:21:12,304 - INFO -   Should retrain: True
+2025-11-19 18:21:12,305 - INFO -   Triggers:
+2025-11-19 18:21:12,305 - INFO -     - Force retrain flag set
+2025-11-19 18:21:12,305 - INFO -     - New data: 3000 samples (>= 50)
+2025-11-19 18:21:12,308 - INFO - 
+[DATA] Data Split:
+2025-11-19 18:21:12,308 - INFO -   Training samples: 2400
+2025-11-19 18:21:12,308 - INFO -   Test samples:     600
+2025-11-19 18:21:12,311 - INFO - 
+[TRAIN] Training Enhanced Model...
+2025-11-19 18:21:12,901 - INFO - 
+[DATA] Model Performance:
+2025-11-19 18:21:12,901 - INFO -   Accuracy: 0.8450
+2025-11-19 18:21:12,901 - INFO -   F1 Score: 0.7947
+2025-11-19 18:21:12,902 - INFO -   AUC:      0.9345
+2025-11-19 18:21:12,902 - INFO - 
+[TOP] Top 5 Feature Importances:
+2025-11-19 18:21:12,902 - INFO -   1. sleep_hours               0.1635
+2025-11-19 18:21:12,902 - INFO -   2. current_pain_score        0.1291
+2025-11-19 18:21:12,903 - INFO -   3. bmi                       0.1108
+2025-11-19 18:21:12,903 - INFO -   4. swollen_joint_count       0.0963
+2025-11-19 18:21:12,903 - INFO -   5. disease_duration          0.0883
+2025-11-19 18:21:12,903 - INFO - 
+[OK] Model Validation:
+2025-11-19 18:21:12,903 - INFO -   Valid: True
+2025-11-19 18:21:12,907 - INFO - [SAVE] Saved model: ra_model_gradient_boosting.pkl
+2025-11-19 18:21:12,908 - INFO - [SAVE] Saved scaler: ra_scaler_gradient_boosting.pkl
+2025-11-19 18:21:12,908 - INFO - [SAVE] Saved features: ra_features_gradient_boosting.pkl
+2025-11-19 18:21:12,909 - INFO - [SAVE] Saved model type: ra_model_type.pkl
+2025-11-19 18:21:12,910 - INFO - [SAVE] Saved metadata: training_metadata.json
+2025-11-19 18:21:12,910 - INFO - 
+============================================================
+2025-11-19 18:21:12,910 - INFO - [OK] PIPELINE COMPLETED SUCCESSFULLY
+2025-11-19 18:21:12,910 - INFO - ============================================================
+2025-11-19 18:21:12,910 - INFO -   Model Type: Enhanced Gradient Boosting
+2025-11-19 18:21:12,911 - INFO -   Features: 16
+2025-11-19 18:21:12,911 - INFO -   Accuracy: 0.8450
+2025-11-19 18:21:12,911 - INFO -   F1 Score: 0.7947
+2025-11-19 18:21:12,911 - INFO -   AUC: 0.9345
+2025-11-19 18:21:12,911 - INFO - ============================================================
