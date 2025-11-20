@@ -1,0 +1,102 @@
+name: Automated ML Retraining - Enhanced
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'  # Run every 6 hours
+  workflow_dispatch:  # Manual trigger
+  push:
+    paths:
+      - 'ra_data_enhanced.csv'  # Trigger on enhanced data changes
+
+permissions:
+  contents: write
+
+jobs:
+  retrain:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout main branch
+        uses: actions/checkout@v3
+        with:
+          ref: main
+      
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.9'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install pandas numpy scikit-learn joblib requests python-dotenv
+      
+      - name: Check triggers and run enhanced pipeline
+        id: check_changes
+        run: |
+          echo "Running enhanced retraining pipeline..."
+          python auto_pipeline_enhanced.py
+          if [ $? -eq 0 ]; then
+            echo "changed=true" >> $GITHUB_OUTPUT
+            echo "Pipeline completed successfully"
+          else
+            echo "changed=false" >> $GITHUB_OUTPUT
+            echo "No retraining needed or validation failed"
+          fi
+      
+      - name: Commit and push if changed
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add ra_model_gradient_boosting.pkl
+          git add ra_scaler_gradient_boosting.pkl
+          git add ra_features_gradient_boosting.pkl
+          git add ra_model_type.pkl
+          git add training_metadata.json
+          git add auto_pipeline.log
+          git commit -m "🤖 Auto-update: Enhanced model retrained - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes to commit"
+          git push origin main || echo "Nothing to push"
+      
+      - name: Save analytics to Supabase
+        if: steps.check_changes.outputs.changed == 'true'
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "Saving training analytics to Supabase..."
+          if [ -f "save_analytics_rest.py" ]; then
+            python save_analytics_rest.py || echo "Analytics save failed (non-critical)"
+          else
+            echo "save_analytics_rest.py not found - skipping analytics"
+          fi
+      
+      - name: Trigger Render deployment
+        if: steps.check_changes.outputs.changed == 'true'
+        run: |
+          echo "✅ Enhanced model updated on main branch"
+          echo "🚀 Render will auto-deploy from main branch"
+          echo "📊 Model: Enhanced Gradient Boosting (16 features)"
+          echo "🎯 Target: 84.5% accuracy, 0.93 AUC"
+      
+      - name: Upload pipeline logs
+        if: always()
+        uses: actions/upload-artifact@v3
+        with:
+          name: pipeline-logs
+          path: auto_pipeline.log
+          retention-days: 30
+      
+      - name: Create summary
+        if: always()
+        run: |
+          echo "## 🏥 RA Flare Prediction - Enhanced Model Retraining" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Pipeline Status:** ${{ steps.check_changes.outputs.changed == 'true' && '✅ Model Updated' || '⏭️ No Update Needed' }}" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          if [ -f "training_metadata.json" ]; then
+            echo "### 📊 Model Performance" >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
+            cat training_metadata.json >> $GITHUB_STEP_SUMMARY
+            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          fi
