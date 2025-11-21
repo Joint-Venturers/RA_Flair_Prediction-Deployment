@@ -164,3 +164,39 @@
 2025-11-21 00:54:31,541 - INFO -   Should retrain: False
 2025-11-21 00:54:31,541 - INFO - 
 [OK] No retraining needed
+2025-11-21 06:18:50,355 - INFO - [OK] Loaded config from pipeline_config.json
+2025-11-21 06:18:50,355 - INFO - ============================================================
+2025-11-21 06:18:50,355 - INFO - [RA] Enhanced RA Flare Prediction Pipeline
+2025-11-21 06:18:50,355 - INFO - ============================================================
+2025-11-21 06:18:50,355 - INFO - [DATA] Features: 16
+2025-11-21 06:18:50,355 - INFO - [FILE] Data file: ra_data_enhanced.csv
+2025-11-21 06:18:50,355 - INFO - 
+============================================================
+2025-11-21 06:18:50,355 - INFO - [START] Pipeline Started: 2025-11-21T06:18:50.355755
+2025-11-21 06:18:50,355 - INFO - ============================================================
+2025-11-21 06:18:50,362 - INFO - [OK] Loaded 3000 samples from ra_data_enhanced.csv
+2025-11-21 06:18:50,362 - INFO - [DATA] Flare rate: 39.8%
+2025-11-21 06:18:50,363 - INFO - [INFO] Previous model: accuracy=0.8450
+2025-11-21 06:18:50,363 - INFO - 
+[CHECK] Retraining Check:
+2025-11-21 06:18:50,363 - INFO -   Should retrain: False
+2025-11-21 06:18:50,363 - INFO - 
+[OK] No retraining needed
+2025-11-21 12:22:01,770 - INFO - [OK] Loaded config from pipeline_config.json
+2025-11-21 12:22:01,770 - INFO - ============================================================
+2025-11-21 12:22:01,770 - INFO - [RA] Enhanced RA Flare Prediction Pipeline
+2025-11-21 12:22:01,770 - INFO - ============================================================
+2025-11-21 12:22:01,770 - INFO - [DATA] Features: 16
+2025-11-21 12:22:01,770 - INFO - [FILE] Data file: ra_data_enhanced.csv
+2025-11-21 12:22:01,770 - INFO - 
+============================================================
+2025-11-21 12:22:01,770 - INFO - [START] Pipeline Started: 2025-11-21T12:22:01.770537
+2025-11-21 12:22:01,770 - INFO - ============================================================
+2025-11-21 12:22:01,777 - INFO - [OK] Loaded 3000 samples from ra_data_enhanced.csv
+2025-11-21 12:22:01,777 - INFO - [DATA] Flare rate: 39.8%
+2025-11-21 12:22:01,777 - INFO - [INFO] Previous model: accuracy=0.8450
+2025-11-21 12:22:01,778 - INFO - 
+[CHECK] Retraining Check:
+2025-11-21 12:22:01,778 - INFO -   Should retrain: False
+2025-11-21 12:22:01,778 - INFO - 
+[OK] No retraining needed
