@@ -1,5 +1,5 @@
-# Enhanced RA Flare Prediction API with Analytics
-# Includes prediction endpoints + comprehensive analytics endpoints
+# Enhanced RA Flare Prediction API with Analytics & User-Linked Predictions
+# Version 2.1.0 - Includes user profile integration
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -22,8 +22,8 @@ from analytics_helper import (
 # Initialize FastAPI app
 app = FastAPI(
     title="RA Flare Prediction API - Enhanced",
-    description="Machine Learning API for predicting rheumatoid arthritis flares with personalized trigger identification and comprehensive analytics",
-    version="2.0.0"
+    description="Machine Learning API for predicting rheumatoid arthritis flares with personalized trigger identification, comprehensive analytics, and user profile integration",
+    version="2.1.0"
 )
 
 # CORS middleware
@@ -84,6 +84,7 @@ class PatientData(BaseModel):
     current_pain_score: float
     tender_joint_count: int
     swollen_joint_count: int
+    user_id: Optional[str] = None  # NEW: Optional user UUID
 
 
 class BatchPredictionRequest(BaseModel):
@@ -93,8 +94,8 @@ class BatchPredictionRequest(BaseModel):
 # HELPER FUNCTIONS
 # ============================================================
 
-async def log_prediction_to_supabase(result: dict, input_data: dict):
-    """Log prediction to Supabase for analytics"""
+async def log_prediction_to_supabase(result: dict, input_data: dict, user_id: Optional[str] = None):
+    """Log prediction to Supabase for analytics with user linkage"""
     if not supabase:
         return False
     
@@ -106,6 +107,7 @@ async def log_prediction_to_supabase(result: dict, input_data: dict):
             'risk_level': result['risk_level'],
             'triggers': result.get('personalized_triggers', []),
             'features': input_data,
+            'user_id': user_id,  # Link to user profile
             'timestamp': datetime.now().isoformat()
         }
         
@@ -251,7 +253,7 @@ def assess_risk_level(probability: float) -> str:
 async def root():
     """API root endpoint"""
     return {
-        "message": "RA Flare Prediction API - Enhanced v2.0",
+        "message": "RA Flare Prediction API - Enhanced v2.1",
         "model_type": model_type if model_type else "Model not loaded",
         "features": len(feature_names) if feature_names else 0,
         "endpoints": {
@@ -267,9 +269,14 @@ async def root():
                 "/analytics/predictions-summary",
                 "/analytics/training-history",
                 "/analytics/model-insights"
+            ],
+            "user_analytics": [
+                "/analytics/user/{user_id}/predictions",
+                "/analytics/user/{user_id}/triggers",
+                "/analytics/user/{user_id}/summary"
             ]
         },
-        "version": "2.0.0",
+        "version": "2.1.0",
         "status": "operational"
     }
 
@@ -305,6 +312,7 @@ async def get_features():
 async def predict(data: PatientData):
     """
     Single prediction endpoint with personalized trigger identification
+    Supports optional user_id for user-linked predictions
     """
     if not model or not scaler:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -359,8 +367,8 @@ async def predict(data: PatientData):
             "timestamp": datetime.now().isoformat()
         }
         
-        # Log prediction to Supabase
-        await log_prediction_to_supabase(result, data_dict)
+        # Log prediction to Supabase with user linkage
+        await log_prediction_to_supabase(result, data_dict, data.user_id)
         
         return result
         
@@ -372,6 +380,7 @@ async def predict(data: PatientData):
 async def predict_batch(request: BatchPredictionRequest):
     """
     Batch prediction endpoint
+    Supports optional user_id for each patient
     """
     if not model or not scaler:
         raise HTTPException(status_code=503, detail="Model not loaded")
@@ -433,8 +442,8 @@ async def predict_batch(request: BatchPredictionRequest):
                 "timestamp": datetime.now().isoformat()
             }
             
-            # Log prediction to Supabase
-            await log_prediction_to_supabase(result, data_dict)
+            # Log prediction to Supabase with user linkage
+            await log_prediction_to_supabase(result, data_dict, patient_data.user_id)
             
             results.append(result)
         
@@ -450,7 +459,7 @@ async def predict_batch(request: BatchPredictionRequest):
 
 
 # ============================================================
-# ANALYTICS ENDPOINTS
+# ANALYTICS ENDPOINTS - SYSTEM LEVEL
 # ============================================================
 
 @app.get("/analytics/health")
@@ -467,15 +476,7 @@ async def analytics_health():
 
 @app.get("/analytics/model-performance")
 async def get_model_performance():
-    """
-    Get current model performance metrics
-    
-    Returns:
-    - accuracy, f1_score, auc
-    - training date
-    - model type
-    - feature count
-    """
+    """Get current model performance metrics"""
     try:
         metadata = load_training_metadata()
         
@@ -504,15 +505,7 @@ async def get_model_performance():
 
 @app.get("/analytics/feature-importance")
 async def get_feature_importance_endpoint():
-    """
-    Get feature importance rankings with categories
-    
-    Returns:
-    - All features ranked by importance
-    - Top 5 features
-    - Features grouped by category
-    - Clinical descriptions
-    """
+    """Get feature importance rankings with categories"""
     try:
         feature_data = get_feature_importance()
         
@@ -529,17 +522,7 @@ async def get_feature_importance_endpoint():
 
 @app.get("/analytics/trigger-frequency")
 async def get_trigger_frequency(days: Optional[int] = 30):
-    """
-    Get trigger frequency statistics for the last N days
-    
-    Query Parameters:
-    - days: Number of days to analyze (default: 30)
-    
-    Returns:
-    - Trigger counts and percentages
-    - Severity distributions
-    - Average impact scores
-    """
+    """Get trigger frequency statistics for the last N days"""
     try:
         if not supabase:
             return {
@@ -547,7 +530,6 @@ async def get_trigger_frequency(days: Optional[int] = 30):
                 "message": "Analytics database unavailable"
             }
         
-        # Query predictions from last N days
         cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
         
         response = supabase.table('predictions')\
@@ -564,7 +546,6 @@ async def get_trigger_frequency(days: Optional[int] = 30):
                 "time_period": f"last_{days}_days"
             }
         
-        # Calculate trigger statistics
         stats = calculate_trigger_statistics(predictions)
         stats['time_period'] = f"last_{days}_days"
         
@@ -575,17 +556,7 @@ async def get_trigger_frequency(days: Optional[int] = 30):
 
 @app.get("/analytics/trigger-combinations")
 async def get_trigger_combinations(days: Optional[int] = 30):
-    """
-    Analyze common trigger combinations
-    
-    Query Parameters:
-    - days: Number of days to analyze (default: 30)
-    
-    Returns:
-    - Most common trigger combinations
-    - Flare rates for each combination
-    - Average probabilities
-    """
+    """Analyze common trigger combinations"""
     try:
         if not supabase:
             return {
@@ -593,7 +564,6 @@ async def get_trigger_combinations(days: Optional[int] = 30):
                 "message": "Analytics database unavailable"
             }
         
-        # Query predictions from last N days
         cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
         
         response = supabase.table('predictions')\
@@ -609,7 +579,6 @@ async def get_trigger_combinations(days: Optional[int] = 30):
                 "total_predictions": 0
             }
         
-        # Analyze combinations
         combinations = analyze_trigger_combinations(predictions)
         combinations['time_period'] = f"last_{days}_days"
         
@@ -620,17 +589,7 @@ async def get_trigger_combinations(days: Optional[int] = 30):
 
 @app.get("/analytics/trigger-impact")
 async def get_trigger_impact(days: Optional[int] = 30):
-    """
-    Calculate individual trigger impact on flare predictions
-    
-    Query Parameters:
-    - days: Number of days to analyze (default: 30)
-    
-    Returns:
-    - Relative risk for each trigger
-    - Flare rates when trigger present vs absent
-    - Impact categories (Major/Moderate/Minor/Low)
-    """
+    """Calculate individual trigger impact on flare predictions"""
     try:
         if not supabase:
             return {
@@ -638,7 +597,6 @@ async def get_trigger_impact(days: Optional[int] = 30):
                 "message": "Analytics database unavailable"
             }
         
-        # Query predictions from last N days
         cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
         
         response = supabase.table('predictions')\
@@ -654,7 +612,6 @@ async def get_trigger_impact(days: Optional[int] = 30):
                 "total_predictions": 0
             }
         
-        # Calculate impact
         impact_data = calculate_trigger_impact(predictions)
         impact_data['time_period'] = f"last_{days}_days"
         
@@ -665,18 +622,7 @@ async def get_trigger_impact(days: Optional[int] = 30):
 
 @app.get("/analytics/predictions-summary")
 async def get_predictions_summary(days: Optional[int] = 30):
-    """
-    Get summary statistics for predictions
-    
-    Query Parameters:
-    - days: Number of days to analyze (default: 30)
-    
-    Returns:
-    - Total predictions
-    - Flare rate
-    - Risk level distribution
-    - Average probability
-    """
+    """Get summary statistics for predictions"""
     try:
         if not supabase:
             return {
@@ -684,7 +630,6 @@ async def get_predictions_summary(days: Optional[int] = 30):
                 "message": "Analytics database unavailable"
             }
         
-        # Query predictions from last N days
         cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
         
         response = supabase.table('predictions')\
@@ -701,18 +646,15 @@ async def get_predictions_summary(days: Optional[int] = 30):
                 "time_period": f"last_{days}_days"
             }
         
-        # Calculate summary statistics
         total = len(predictions)
         flares = sum(1 for p in predictions if p.get('prediction') == 1)
         flare_rate = round((flares / total) * 100, 1) if total > 0 else 0
         
-        # Risk level distribution
         risk_levels = {}
         for p in predictions:
             level = p.get('risk_level', 'unknown')
             risk_levels[level] = risk_levels.get(level, 0) + 1
         
-        # Average probability
         avg_prob = round(
             sum(p.get('probability', 0) for p in predictions) / total,
             3
@@ -733,16 +675,7 @@ async def get_predictions_summary(days: Optional[int] = 30):
 
 @app.get("/analytics/training-history")
 async def get_training_history(limit: Optional[int] = 10):
-    """
-    Get training history from Supabase
-    
-    Query Parameters:
-    - limit: Number of recent training runs to retrieve (default: 10)
-    
-    Returns:
-    - List of training runs with performance metrics
-    - Feature importances for each run
-    """
+    """Get training history from Supabase"""
     try:
         if not supabase:
             return {
@@ -775,14 +708,7 @@ async def get_training_history(limit: Optional[int] = 10):
 
 @app.get("/analytics/model-insights")
 async def get_model_insights_endpoint():
-    """
-    Get combined model performance + feature importance insights
-    
-    Returns:
-    - Model performance metrics
-    - Top predictive features with clinical significance
-    - Trigger mapping for each feature
-    """
+    """Get combined model performance + feature importance insights"""
     try:
         insights = get_model_insights()
         
@@ -793,6 +719,203 @@ async def get_model_insights_endpoint():
             }
         
         return insights
+    except Exception as e:
+        return {"error": str(e)}
+
+
+# ============================================================
+# ANALYTICS ENDPOINTS - USER SPECIFIC
+# ============================================================
+
+@app.get("/analytics/user/{user_id}/predictions")
+async def get_user_predictions(user_id: str, limit: Optional[int] = 50):
+    """
+    Get prediction history for a specific user
+    
+    Path Parameters:
+    - user_id: UUID of the user
+    
+    Query Parameters:
+    - limit: Number of predictions to retrieve (default: 50)
+    """
+    try:
+        if not supabase:
+            return {
+                "error": "Supabase not configured",
+                "message": "Analytics database unavailable"
+            }
+        
+        response = supabase.table('predictions')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .order('timestamp', desc=True)\
+            .limit(limit)\
+            .execute()
+        
+        predictions = response.data if response.data else []
+        
+        if not predictions:
+            return {
+                "message": f"No predictions found for user {user_id}",
+                "user_id": user_id,
+                "predictions": []
+            }
+        
+        # Calculate user-specific statistics
+        total = len(predictions)
+        flares = sum(1 for p in predictions if p.get('prediction') == 1)
+        flare_rate = round((flares / total) * 100, 1) if total > 0 else 0
+        
+        # Risk level distribution
+        risk_levels = {}
+        for p in predictions:
+            level = p.get('risk_level', 'unknown')
+            risk_levels[level] = risk_levels.get(level, 0) + 1
+        
+        # Average probability
+        avg_prob = round(
+            sum(p.get('probability', 0) for p in predictions) / total,
+            3
+        ) if total > 0 else 0
+        
+        return {
+            "user_id": user_id,
+            "total_predictions": total,
+            "flare_count": flares,
+            "flare_rate_percentage": flare_rate,
+            "risk_distribution": risk_levels,
+            "average_probability": avg_prob,
+            "predictions": predictions,
+            "timestamp": datetime.now().isoformat()
+        }
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/analytics/user/{user_id}/triggers")
+async def get_user_triggers(user_id: str, days: Optional[int] = 30):
+    """
+    Get trigger frequency for a specific user
+    
+    Path Parameters:
+    - user_id: UUID of the user
+    
+    Query Parameters:
+    - days: Number of days to analyze (default: 30)
+    """
+    try:
+        if not supabase:
+            return {
+                "error": "Supabase not configured",
+                "message": "Analytics database unavailable"
+            }
+        
+        # Query user's predictions from last N days
+        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+        
+        response = supabase.table('predictions')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .gte('timestamp', cutoff_date)\
+            .execute()
+        
+        predictions = response.data if response.data else []
+        
+        if not predictions:
+            return {
+                "message": f"No predictions found for user in the last {days} days",
+                "user_id": user_id,
+                "total_predictions": 0
+            }
+        
+        # Calculate trigger statistics
+        stats = calculate_trigger_statistics(predictions)
+        stats['user_id'] = user_id
+        stats['time_period'] = f"last_{days}_days"
+        
+        return stats
+    except Exception as e:
+        return {"error": str(e)}
+
+
+@app.get("/analytics/user/{user_id}/summary")
+async def get_user_summary(user_id: str):
+    """
+    Get comprehensive summary for a user
+    
+    Path Parameters:
+    - user_id: UUID of the user
+    
+    Returns:
+    - User profile information
+    - Prediction statistics
+    - Most common triggers
+    - Risk trends
+    """
+    try:
+        if not supabase:
+            return {
+                "error": "Supabase not configured",
+                "message": "Analytics database unavailable"
+            }
+        
+        # Get user profile
+        profile_response = supabase.table('profiles')\
+            .select('*')\
+            .eq('id', user_id)\
+            .single()\
+            .execute()
+        
+        profile = profile_response.data if profile_response.data else {}
+        
+        # Get all user predictions
+        predictions_response = supabase.table('predictions')\
+            .select('*')\
+            .eq('user_id', user_id)\
+            .order('timestamp', desc=True)\
+            .execute()
+        
+        predictions = predictions_response.data if predictions_response.data else []
+        
+        if not predictions:
+            return {
+                "user_id": user_id,
+                "profile": profile,
+                "message": "No predictions found for this user",
+                "statistics": {}
+            }
+        
+        # Calculate statistics
+        total = len(predictions)
+        flares = sum(1 for p in predictions if p.get('prediction') == 1)
+        flare_rate = round((flares / total) * 100, 1) if total > 0 else 0
+        
+        # Get recent predictions (last 10)
+        recent_predictions = predictions[:10]
+        
+        # Calculate trigger statistics
+        trigger_stats = calculate_trigger_statistics(predictions)
+        
+        return {
+            "user_id": user_id,
+            "profile": {
+                "is_doctor": profile.get('is_doctor', False),
+                "diagnosis_date": profile.get('diagnosis_date'),
+                "sex": profile.get('sex'),
+                "birth_date": profile.get('birth_date'),
+                "height_cm": profile.get('height_cm'),
+                "weight_kg": profile.get('weight_kg')
+            },
+            "statistics": {
+                "total_predictions": total,
+                "flare_count": flares,
+                "flare_rate_percentage": flare_rate,
+                "most_recent_prediction": recent_predictions[0] if recent_predictions else None
+            },
+            "top_triggers": trigger_stats.get('trigger_counts', {}),
+            "recent_predictions": recent_predictions,
+            "timestamp": datetime.now().isoformat()
+        }
     except Exception as e:
         return {"error": str(e)}
 
