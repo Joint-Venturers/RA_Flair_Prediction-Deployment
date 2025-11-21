@@ -146,3 +146,21 @@
 2025-11-20 18:17:13,643 - INFO -   Should retrain: False
 2025-11-20 18:17:13,643 - INFO - 
 [OK] No retraining needed
+2025-11-21 00:54:31,533 - INFO - [OK] Loaded config from pipeline_config.json
+2025-11-21 00:54:31,533 - INFO - ============================================================
+2025-11-21 00:54:31,533 - INFO - [RA] Enhanced RA Flare Prediction Pipeline
+2025-11-21 00:54:31,533 - INFO - ============================================================
+2025-11-21 00:54:31,533 - INFO - [DATA] Features: 16
+2025-11-21 00:54:31,534 - INFO - [FILE] Data file: ra_data_enhanced.csv
+2025-11-21 00:54:31,534 - INFO - 
+============================================================
+2025-11-21 00:54:31,534 - INFO - [START] Pipeline Started: 2025-11-21T00:54:31.534142
+2025-11-21 00:54:31,534 - INFO - ============================================================
+2025-11-21 00:54:31,540 - INFO - [OK] Loaded 3000 samples from ra_data_enhanced.csv
+2025-11-21 00:54:31,541 - INFO - [DATA] Flare rate: 39.8%
+2025-11-21 00:54:31,541 - INFO - [INFO] Previous model: accuracy=0.8450
+2025-11-21 00:54:31,541 - INFO - 
+[CHECK] Retraining Check:
+2025-11-21 00:54:31,541 - INFO -   Should retrain: False
+2025-11-21 00:54:31,541 - INFO - 
+[OK] No retraining needed
