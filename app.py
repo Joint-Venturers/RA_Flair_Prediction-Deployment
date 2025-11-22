@@ -1,3 +1,4 @@
+# app.py
 # Enhanced RA Flare Prediction API with Analytics & 14 Features
 # Version 3.0.0 - Episode history tracking with comprehensive analytics
 
@@ -23,8 +24,9 @@ try:
         get_model_insights
     )
     ANALYTICS_HELPER_AVAILABLE = True
-except ImportError:
-    print("[WARN] analytics_helper.py not found - using built-in analytics")
+    print("[INFO] analytics_helper.py loaded successfully")
+except ImportError as e:
+    print(f"[WARN] analytics_helper.py not found: {e}")
     ANALYTICS_HELPER_AVAILABLE = False
 
 # Initialize FastAPI app
@@ -508,29 +510,32 @@ def analytics_overview():
 def model_performance():
     """Get model performance metrics"""
     
-    if ANALYTICS_HELPER_AVAILABLE:
-        try:
-            # Use analytics helper if available
-            training_metadata = load_training_metadata()
-            insights = get_model_insights()
-            return {
-                "model_type": MODEL_METADATA.get('model_type', 'unknown'),
-                "metrics": MODEL_METADATA.get('metrics', {}),
-                "n_features": MODEL_METADATA.get('n_features', 14),
-                "training_date": MODEL_METADATA.get('training_date', 'unknown'),
-                "insights": insights,
-                "training_history": training_metadata
-            }
-        except:
-            pass
-    
-    # Fallback to basic metadata
-    return {
-        "model_type": MODEL_METADATA.get('model_type', 'unknown'),
-        "metrics": MODEL_METADATA.get('metrics', {}),
-        "n_features": MODEL_METADATA.get('n_features', 14),
-        "training_date": MODEL_METADATA.get('training_date', 'unknown')
-    }
+    try:
+        # Try analytics helper first
+        if ANALYTICS_HELPER_AVAILABLE:
+            try:
+                training_metadata = load_training_metadata()
+                insights = get_model_insights()
+                return {
+                    "model_type": MODEL_METADATA.get('model_type', 'unknown'),
+                    "metrics": MODEL_METADATA.get('metrics', {}),
+                    "n_features": MODEL_METADATA.get('n_features', 14),
+                    "training_date": MODEL_METADATA.get('training_date', 'unknown'),
+                    "insights": insights,
+                    "training_history": training_metadata
+                }
+            except Exception as e:
+                print(f"[WARN] Analytics helper error: {e}")
+        
+        # Fallback to basic metadata
+        return {
+            "model_type": MODEL_METADATA.get('model_type', 'unknown'),
+            "metrics": MODEL_METADATA.get('metrics', {}),
+            "n_features": MODEL_METADATA.get('n_features', 14),
+            "training_date": MODEL_METADATA.get('training_date', 'unknown')
+        }
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Model performance error: {str(e)}")
 
 @app.get("/analytics/triggers")
 def trigger_analysis():
@@ -589,17 +594,19 @@ def trigger_analysis():
 def feature_importance():
     """Get feature importance rankings"""
     
-    if ANALYTICS_HELPER_AVAILABLE:
-        try:
-            importance = get_feature_importance()
-            return {"feature_importance": importance}
-        except:
-            pass
+    # Always use metadata - don't call analytics_helper
+    # This avoids file lookup errors for old model filenames
+    feature_importance_data = MODEL_METADATA.get('metrics', {}).get('feature_importance', [])
     
-    # Fallback to metadata
-    return {
-        "feature_importance": MODEL_METADATA.get('metrics', {}).get('feature_importance', [])
-    }
+    if not feature_importance_data:
+        # Generate basic importance from feature names if not available
+        feature_importance_data = [
+            {"feature": feature, "importance": 0.0, "category": "unknown"}
+            for feature in FEATURE_COLUMNS
+        ]
+    
+    return {"feature_importance": feature_importance_data}
+
 
 @app.get("/analytics/trigger-combinations")
 def trigger_combinations():
@@ -609,11 +616,6 @@ def trigger_combinations():
         raise HTTPException(status_code=503, detail="Database not available")
     
     try:
-        if ANALYTICS_HELPER_AVAILABLE:
-            combinations = analyze_trigger_combinations()
-            return {"combinations": combinations}
-        
-        # Basic combination analysis
         thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
         
         predictions = supabase.table('predictions')\
@@ -624,7 +626,15 @@ def trigger_combinations():
         if not predictions.data:
             return {"combinations": []}
         
-        # Count co-occurrences
+        # Try analytics helper if available
+        if ANALYTICS_HELPER_AVAILABLE:
+            try:
+                combinations = analyze_trigger_combinations(predictions.data)
+                return {"combinations": combinations}
+            except Exception as e:
+                print(f"[WARN] Analytics helper error: {e}")
+        
+        # Fallback: Basic combination analysis
         combo_counts = {}
         for pred in predictions.data:
             if pred.get('triggers'):
