@@ -762,7 +762,6 @@ class UserInsightsRequest(BaseModel):
 def get_user_insights():
     """
     Get user-specific analytics from Supabase predictions table
-    Queries real data and calculates trigger correlations
     """
     try:
         data = request.json
@@ -805,12 +804,12 @@ def get_user_insights():
         flare_count = sum(1 for p in predictions if p['prediction'] == 1)
         flare_rate = flare_count / total_predictions if total_predictions > 0 else 0
         
-        # Calculate triggers from features
+        # Calculate triggers
         trigger_stats = calculate_triggers_from_features(predictions)
         
         # Format recent predictions
         recent_predictions = []
-        for pred in predictions[:15]:  # Latest 15
+        for pred in predictions[:15]:
             features = pred.get('features', {})
             triggers = identify_triggers_from_features(features)
             
@@ -822,7 +821,7 @@ def get_user_insights():
                 "pain_score": int(features.get('current_pain_score', 0))
             })
         
-        result = {
+        return jsonify({
             "user_id": user_id,
             "period_days": days,
             "total_predictions": total_predictions,
@@ -830,15 +829,64 @@ def get_user_insights():
             "flare_rate": round(flare_rate, 4),
             "top_triggers": trigger_stats,
             "recent_predictions": recent_predictions
-        }
-        
-        logger.info(f"Returning {total_predictions} predictions, {flare_count} flares, {len(trigger_stats)} triggers")
-        
-        return jsonify(result), 200
+        }), 200
         
     except Exception as e:
         logger.error(f"Error in user insights: {str(e)}")
         return jsonify({"error": str(e)}), 500
+
+
+def identify_triggers_from_features(features):
+    """Identify triggers from feature values"""
+    triggers = []
+    
+    if features.get('sleep_hours', 7) < 6:
+        triggers.append("Poor Sleep")
+    if features.get('current_pain_score', 0) >= 7:
+        triggers.append("Elevated Pain Score")
+    if features.get('air_quality_index', 50) > 100:
+        triggers.append("Poor Air Quality")
+    if features.get('change_in_barometric_pressure', 0) < -5:
+        triggers.append("Barometric Pressure Drop")
+    if features.get('min_temperature', 15) < 5:
+        triggers.append("Cold Weather")
+    if features.get('humidity', 60) > 75:
+        triggers.append("High Humidity")
+    if features.get('days_since_last_episode', 999) <= 3:
+        triggers.append("Recent Episode")
+    
+    return triggers
+
+
+def calculate_triggers_from_features(predictions):
+    """Calculate trigger statistics"""
+    trigger_counts = {}
+    trigger_flare_counts = {}
+    
+    for pred in predictions:
+        features = pred.get('features', {})
+        triggers = identify_triggers_from_features(features)
+        is_flare = pred['prediction'] == 1
+        
+        for trigger in triggers:
+            if trigger not in trigger_counts:
+                trigger_counts[trigger] = 0
+                trigger_flare_counts[trigger] = 0
+            trigger_counts[trigger] += 1
+            if is_flare:
+                trigger_flare_counts[trigger] += 1
+    
+    top_triggers = []
+    for trigger, count in trigger_counts.items():
+        flare_correlation = trigger_flare_counts[trigger] / count if count > 0 else 0
+        top_triggers.append({
+            "trigger": trigger,
+            "count": count,
+            "flare_correlation": round(flare_correlation, 4)
+        })
+    
+    top_triggers.sort(key=lambda x: x['flare_correlation'], reverse=True)
+    return top_triggers[:5]
 
 # ============================================================================
 # RUN SERVER
