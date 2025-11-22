@@ -48,7 +48,7 @@ app.add_middleware(
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
-supabase: Client = None
+supabase: Client = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
 
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
     try:
@@ -313,6 +313,96 @@ def determine_risk_level(probability: float) -> str:
         return 'moderate'
     else:
         return 'low'
+    
+def identify_triggers_from_features(features):
+    """
+    Identify triggers based on feature values
+    Returns list of trigger names
+    """
+    triggers = []
+    
+    # Poor sleep (< 6 hours)
+    sleep_hours = features.get('sleep_hours', 7)
+    if sleep_hours < 6:
+        triggers.append("Poor Sleep")
+    
+    # Elevated pain (>= 7)
+    pain_score = features.get('current_pain_score', 0)
+    if pain_score >= 7:
+        triggers.append("Elevated Pain Score")
+    
+    # Poor air quality (> 100)
+    aqi = features.get('air_quality_index', 50)
+    if aqi > 100:
+        triggers.append("Poor Air Quality")
+    
+    # Barometric pressure drop (< -5)
+    pressure_change = features.get('change_in_barometric_pressure', 0)
+    if pressure_change < -5:
+        triggers.append("Barometric Pressure Drop")
+    
+    # Cold weather (< 5°C)
+    min_temp = features.get('min_temperature', 15)
+    if min_temp < 5:
+        triggers.append("Cold Weather")
+    
+    # High humidity (> 75%)
+    humidity = features.get('humidity', 60)
+    if humidity > 75:
+        triggers.append("High Humidity")
+    
+    # Recent episode (<= 3 days)
+    days_since = features.get('days_since_last_episode', 999)
+    if days_since <= 3:
+        triggers.append("Recent Episode")
+    
+    # Long previous episode (> 5 days)
+    episode_duration = features.get('last_episode_duration', 0)
+    if episode_duration > 5:
+        triggers.append("Long Previous Episode")
+    
+    # Elevated BMI (> 28)
+    bmi = features.get('bmi', 25)
+    if bmi > 28:
+        triggers.append("Elevated BMI")
+    
+    return triggers
+
+
+def calculate_triggers_from_features(predictions):
+    """
+    Calculate trigger statistics from all predictions
+    Returns list of top 5 triggers with correlations
+    """
+    trigger_counts = {}
+    trigger_flare_counts = {}
+    
+    for pred in predictions:
+        features = pred.get('features', {})
+        triggers = identify_triggers_from_features(features)
+        is_flare = pred['prediction'] == 1
+        
+        for trigger in triggers:
+            if trigger not in trigger_counts:
+                trigger_counts[trigger] = 0
+                trigger_flare_counts[trigger] = 0
+            trigger_counts[trigger] += 1
+            if is_flare:
+                trigger_flare_counts[trigger] += 1
+    
+    # Calculate correlations
+    top_triggers = []
+    for trigger, count in trigger_counts.items():
+        flare_correlation = trigger_flare_counts[trigger] / count if count > 0 else 0
+        top_triggers.append({
+            "trigger": trigger,
+            "count": count,
+            "flare_correlation": round(flare_correlation, 4)
+        })
+    
+    # Sort by correlation (highest first), return top 5
+    top_triggers.sort(key=lambda x: x['flare_correlation'], reverse=True)
+    return top_triggers[:5]
 
 # ============================================================================
 # ROOT ENDPOINTS
@@ -668,73 +758,87 @@ class UserInsightsRequest(BaseModel):
     user_id: str
     days: Optional[int] = 30
 
-@app.post("/analytics/user-insights")
-def user_insights(request: UserInsightsRequest):
-    """Get comprehensive insights for a specific user"""
-    
-    if not supabase:
-        raise HTTPException(status_code=503, detail="Database not available")
-    
+@app.route('/analytics/user-insights', methods=['POST'])
+def get_user_insights():
+    """
+    Get user-specific analytics from Supabase predictions table
+    Queries real data and calculates trigger correlations
+    """
     try:
-        # Get user predictions
-        cutoff_date = (datetime.now() - timedelta(days=request.days)).isoformat()
+        data = request.json
+        user_id = data.get('user_id')
+        days = data.get('days', 30)
         
-        predictions = supabase.table('predictions')\
-            .select('*')\
-            .eq('user_id', request.user_id)\
-            .gte('timestamp', cutoff_date)\
-            .order('timestamp', desc=True)\
+        if not user_id:
+            return jsonify({"error": "user_id is required"}), 400
+        
+        logger.info(f"Fetching user insights for user_id: {user_id}, days: {days}")
+        
+        # Calculate date range
+        start_date = datetime.now() - timedelta(days=days)
+        
+        # Query predictions from Supabase
+        response = supabase.table('predictions') \
+            .select('timestamp, prediction, probability, confidence, risk_level, features') \
+            .eq('user_id', user_id) \
+            .gte('timestamp', start_date.isoformat()) \
+            .order('timestamp', desc=True) \
             .execute()
         
-        if not predictions.data:
-            raise HTTPException(status_code=404, detail="No predictions found for user")
+        predictions = response.data if response.data else []
         
-        total = len(predictions.data)
-        flares = sum(1 for p in predictions.data if p['prediction'] == 1)
+        logger.info(f"Found {len(predictions)} predictions for user {user_id}")
         
-        # Get recent predictions (last 10)
-        recent = predictions.data[:10]
+        if not predictions:
+            return jsonify({
+                "user_id": user_id,
+                "period_days": days,
+                "total_predictions": 0,
+                "flare_count": 0,
+                "flare_rate": 0.0,
+                "top_triggers": [],
+                "recent_predictions": []
+            }), 200
         
-        # Count user-specific triggers
-        trigger_counts = {}
-        for pred in predictions.data:
-            if pred.get('triggers'):
-                triggers_list = json.loads(pred['triggers']) if isinstance(pred['triggers'], str) else pred['triggers']
-                for trigger in triggers_list:
-                    trigger_name = trigger['trigger']
-                    if trigger_name not in trigger_counts:
-                        trigger_counts[trigger_name] = {'count': 0, 'with_flare': 0}
-                    trigger_counts[trigger_name]['count'] += 1
-                    if pred['prediction'] == 1:
-                        trigger_counts[trigger_name]['with_flare'] += 1
+        # Calculate statistics
+        total_predictions = len(predictions)
+        flare_count = sum(1 for p in predictions if p['prediction'] == 1)
+        flare_rate = flare_count / total_predictions if total_predictions > 0 else 0
         
-        top_triggers = sorted(
-            [
-                {
-                    'trigger': k,
-                    'count': v['count'],
-                    'flare_correlation': round(v['with_flare'] / v['count'] if v['count'] > 0 else 0, 4)
-                }
-                for k, v in trigger_counts.items()
-            ],
-            key=lambda x: x['count'],
-            reverse=True
-        )[:5]
+        # Calculate triggers from features
+        trigger_stats = calculate_triggers_from_features(predictions)
         
-        return {
-            "user_id": request.user_id,
-            "period_days": request.days,
-            "total_predictions": total,
-            "flare_count": flares,
-            "flare_rate": round(flares / total if total > 0 else 0, 4),
-            "top_triggers": top_triggers,
-            "recent_predictions": recent
+        # Format recent predictions
+        recent_predictions = []
+        for pred in predictions[:15]:  # Latest 15
+            features = pred.get('features', {})
+            triggers = identify_triggers_from_features(features)
+            
+            recent_predictions.append({
+                "date": pred['timestamp'],
+                "prediction": pred['prediction'],
+                "confidence": round(float(pred['confidence']), 3),
+                "triggers": triggers,
+                "pain_score": int(features.get('current_pain_score', 0))
+            })
+        
+        result = {
+            "user_id": user_id,
+            "period_days": days,
+            "total_predictions": total_predictions,
+            "flare_count": flare_count,
+            "flare_rate": round(flare_rate, 4),
+            "top_triggers": trigger_stats,
+            "recent_predictions": recent_predictions
         }
         
-    except HTTPException:
-        raise
+        logger.info(f"Returning {total_predictions} predictions, {flare_count} flares, {len(trigger_stats)} triggers")
+        
+        return jsonify(result), 200
+        
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"User insights error: {str(e)}")
+        logger.error(f"Error in user insights: {str(e)}")
+        return jsonify({"error": str(e)}), 500
 
 # ============================================================================
 # RUN SERVER
