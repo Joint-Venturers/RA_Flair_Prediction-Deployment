@@ -57,7 +57,7 @@
     "last_episode_duration": "Duration of last flare episode in days",
     "days_since_last_episode": "Days since last inflammation episode"
   },
-  "training_date": "2025-11-21T19:19:46.462493",
+  "training_date": "2025-11-22T00:42:50.863134",
   "metrics": {
     "train_accuracy": 0.8845833333333334,
     "test_accuracy": 0.8166666666666667,
@@ -66,72 +66,72 @@
     "feature_importance": [
       {
         "feature": "days_since_last_episode",
-        "importance": 0.18641459893856385,
+        "importance": 0.18641459893856394,
         "category": "clinical"
       },
       {
         "feature": "sleep_hours",
-        "importance": 0.17661257789554033,
+        "importance": 0.17661257789554027,
         "category": "lifestyle"
       },
       {
         "feature": "bmi",
-        "importance": 0.09585407227291617,
+        "importance": 0.09585407227291622,
         "category": "lifestyle"
       },
       {
         "feature": "current_pain_score",
-        "importance": 0.09521724833741686,
+        "importance": 0.09521724833741678,
         "category": "clinical"
       },
       {
         "feature": "disease_duration",
-        "importance": 0.08867183401242926,
+        "importance": 0.08867183401242928,
         "category": "demographic"
       },
       {
         "feature": "change_in_barometric_pressure",
-        "importance": 0.0851361128816127,
+        "importance": 0.08513611288161275,
         "category": "environmental"
       },
       {
         "feature": "humidity",
-        "importance": 0.07363422017403116,
+        "importance": 0.07363422017403115,
         "category": "environmental"
       },
       {
         "feature": "air_quality_index",
-        "importance": 0.0622261799273447,
+        "importance": 0.062226179927344694,
         "category": "environmental"
       },
       {
         "feature": "smoking_status",
-        "importance": 0.038357314855417594,
+        "importance": 0.03835731485541756,
         "category": "lifestyle"
       },
       {
         "feature": "min_temperature",
-        "importance": 0.03554086205957388,
+        "importance": 0.03554086205957386,
         "category": "environmental"
       },
       {
         "feature": "age",
-        "importance": 0.026192758589738234,
+        "importance": 0.026192758589738244,
         "category": "demographic"
       },
       {
         "feature": "max_temperature",
-        "importance": 0.023826515374369063,
+        "importance": 0.023826515374369132,
         "category": "environmental"
       },
       {
         "feature": "last_episode_duration",
-        "importance": 0.0107074191983515,
+        "importance": 0.010707419198351444,
         "category": "clinical"
       },
       {
         "feature": "sex",
-        "importance": 0.0016082854826946816,
+        "importance": 0.0016082854826946784,
         "category": "demographic"
       }
     ],
