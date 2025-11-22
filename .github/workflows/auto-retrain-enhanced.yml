@@ -1,102 +1,245 @@
-name: Automated ML Retraining - Enhanced
+# .github/workflows/retrain-model.yml
+# Auto-retrain RA Flare Prediction Model with 14 Features (Episode History)
+
+name: Retrain RA Flare Model - 14 Features
 
 on:
+  # Manual trigger
+  workflow_dispatch:
+  
+  # Scheduled retraining (monthly on 1st at 2 AM UTC)
   schedule:
-    - cron: '0 */6 * * *'  # Run every 6 hours
-  workflow_dispatch:  # Manual trigger
+    - cron: '0 2 1 * *'  # At 02:00 on day-of-month 1
+  
+  # Trigger on push to specific paths
   push:
     paths:
-      - 'ra_data_enhanced.csv'  # Trigger on enhanced data changes
+      - 'training_data.csv'
+      - 'train_ra_model.py'
+      - 'generate_enhanced_dataset.py'
 
 permissions:
   contents: write
 
 jobs:
-  retrain:
+  retrain-model:
     runs-on: ubuntu-latest
     
     steps:
-      - name: Checkout main branch
+      - name: Checkout repository
         uses: actions/checkout@v3
-        with:
-          ref: main
       
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
-          python-version: '3.9'
+          python-version: '3.11'
       
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install pandas numpy scikit-learn joblib requests python-dotenv
+          pip install pandas numpy scikit-learn joblib supabase requests python-dotenv
       
-      - name: Check triggers and run enhanced pipeline
-        id: check_changes
+      - name: Check if training data exists
+        id: check_data
         run: |
-          echo "Running enhanced retraining pipeline..."
-          python auto_pipeline_enhanced.py
-          if [ $? -eq 0 ]; then
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "Pipeline completed successfully"
+          if [ -f "training_data.csv" ]; then
+            echo "Training data exists"
+            echo "data_exists=true" >> $GITHUB_OUTPUT
           else
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No retraining needed or validation failed"
+            echo "Training data not found - will generate new data"
+            echo "data_exists=false" >> $GITHUB_OUTPUT
           fi
       
-      - name: Commit and push if changed
-        if: steps.check_changes.outputs.changed == 'true'
+      - name: Generate training data (if not exists)
+        if: steps.check_data.outputs.data_exists == 'false'
+        run: |
+          echo "Generating new training data with 14 features (episode history)..."
+          python generate_enhanced_dataset.py
+      
+      - name: Verify training data format
+        run: |
+          echo "Checking training data columns..."
+          python -c "
+          import pandas as pd
+          df = pd.read_csv('training_data.csv')
+          required_cols = [
+              'age', 'sex', 'disease_duration', 'bmi', 'sleep_hours', 'smoking_status',
+              'air_quality_index', 'min_temperature', 'max_temperature', 'humidity',
+              'change_in_barometric_pressure', 'current_pain_score',
+              'last_episode_duration', 'days_since_last_episode', 'inflammation'
+          ]
+          missing = [col for col in required_cols if col not in df.columns]
+          if missing:
+              raise ValueError(f'Missing columns: {missing}')
+          print(f'✓ All 14 features + target present')
+          print(f'✓ Dataset has {len(df)} samples')
+          print(f'✓ Features: {[col for col in df.columns if col != \"inflammation\"]}')
+          "
+      
+      - name: Train model
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: |
+          echo "Training model with 14 features (including episode history)..."
+          python train_ra_model.py
+      
+      - name: Verify model files
+        run: |
+          if [ ! -f "ra_flare_model.pkl" ]; then
+            echo "❌ Model file not found"
+            exit 1
+          fi
+          if [ ! -f "scaler.pkl" ]; then
+            echo "❌ Scaler file not found"
+            exit 1
+          fi
+          if [ ! -f "model_metadata.json" ]; then
+            echo "❌ Metadata file not found"
+            exit 1
+          fi
+          echo "✓ All model files generated successfully"
+          
+          # Verify metadata
+          python -c "
+          import json
+          with open('model_metadata.json', 'r') as f:
+              metadata = json.load(f)
+          if metadata.get('n_features') != 14:
+              raise ValueError(f\"Expected 14 features, got {metadata.get('n_features')}\")
+          print('✓ Model has correct number of features (14)')
+          "
+      
+      - name: Extract model metrics
+        id: metrics
+        run: |
+          python -c "
+          import json
+          with open('model_metadata.json', 'r') as f:
+              metadata = json.load(f)
+          metrics = metadata['metrics']
+          print(f\"✓ Accuracy: {metrics['test_accuracy']:.4f}\")
+          print(f\"✓ F1 Score: {metrics['f1_score']:.4f}\")
+          print(f\"✓ AUC-ROC: {metrics['auc']:.4f}\")
+          print(f\"✓ Features: {metadata['n_features']}\")
+          print(f\"✓ Training samples: {metrics['train_samples']}\")
+          print(f\"✓ Test samples: {metrics['test_samples']}\")
+          "
+      
+      - name: Commit and push model files
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add ra_model_gradient_boosting.pkl
-          git add ra_scaler_gradient_boosting.pkl
-          git add ra_features_gradient_boosting.pkl
-          git add ra_model_type.pkl
-          git add training_metadata.json
-          git add auto_pipeline.log
-          git commit -m "🤖 Auto-update: Enhanced model retrained - $(date +'%Y-%m-%d %H:%M UTC')" || echo "No changes to commit"
-          git push origin main || echo "Nothing to push"
+          
+          # Add model files
+          git add ra_flare_model.pkl scaler.pkl model_metadata.json
+          
+          # Add training data if it was generated
+          if [ -f "training_data.csv" ]; then
+            git add training_data.csv
+          fi
+          
+          # Create commit message with metrics
+          ACCURACY=$(python -c "import json; print(json.load(open('model_metadata.json'))['metrics']['test_accuracy'])")
+          SAMPLES=$(python -c "import pandas as pd; print(len(pd.read_csv('training_data.csv')))")
+          
+          COMMIT_MSG="🤖 Auto-retrain: Model with 14 features (episode history)
+
+          📊 Metrics:
+          - Accuracy: $ACCURACY
+          - Features: 14 (including last_episode_duration, days_since_last_episode)
+          - Training samples: $SAMPLES
+
+          🕐 Generated: $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          🔧 Workflow: ${{ github.workflow }}
+          ⚡ Trigger: ${{ github.event_name }}"
+          
+          git diff-index --quiet HEAD || git commit -m "$COMMIT_MSG"
+          git push
       
-      - name: Save analytics to Supabase
-        if: steps.check_changes.outputs.changed == 'true'
+      - name: Create GitHub Release (optional)
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Saving training analytics to Supabase..."
-          if [ -f "save_analytics_rest.py" ]; then
-            python save_analytics_rest.py || echo "Analytics save failed (non-critical)"
+          # Get version from metadata
+          VERSION=$(date -u +"%Y.%m.%d-%H%M")
+          
+          # Extract metrics
+          METRICS=$(python -c "import json; m=json.load(open('model_metadata.json'))['metrics']; print(f\"- Accuracy: {m['test_accuracy']:.4f}\\n- F1 Score: {m['f1_score']:.4f}\\n- AUC-ROC: {m['auc']:.4f}\")")
+          
+          # Create release
+          gh release create "v$VERSION" \
+            ra_flare_model.pkl \
+            scaler.pkl \
+            model_metadata.json \
+            --title "Model v$VERSION - 14 Features with Episode History" \
+            --notes "## 🤖 Automated Model Retraining
+
+          **Version:** $VERSION  
+          **Features:** 14 (including episode history tracking)
+
+          ### 📊 Performance Metrics
+          $METRICS
+
+          ### 🔬 Features List
+          **Demographics:** age, sex, disease_duration  
+          **Lifestyle:** bmi, sleep_hours, smoking_status  
+          **Environmental:** air_quality_index, min_temperature, max_temperature, humidity, change_in_barometric_pressure  
+          **Clinical:** current_pain_score, last_episode_duration, days_since_last_episode
+
+          ### 🆕 What's New
+          - **Episode History Tracking**: Includes last flare duration and days since last episode
+          - **10 Trigger Types**: Including 'Recent Episode' and 'Long Previous Episode'
+          - **Enhanced Predictions**: Better accuracy through episode pattern recognition
+
+          ### ⚙️ Deployment Info
+          - **Trigger:** ${{ github.event_name }}
+          - **Date:** $(date -u +'%Y-%m-%d %H:%M:%S UTC')
+          - **Branch:** ${{ github.ref_name }}"
+      
+      - name: Trigger Render deployment (optional)
+        if: success()
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: |
+          if [ -n "$RENDER_DEPLOY_HOOK" ]; then
+            echo "🚀 Triggering Render deployment..."
+            curl -X POST "$RENDER_DEPLOY_HOOK"
+            echo "✓ Deployment triggered successfully"
           else
-            echo "save_analytics_rest.py not found - skipping analytics"
+            echo "⚠ RENDER_DEPLOY_HOOK not configured - skipping auto-deployment"
+            echo "💡 Add RENDER_DEPLOY_HOOK to your repository secrets for auto-deployment"
           fi
       
-      - name: Trigger Render deployment
-        if: steps.check_changes.outputs.changed == 'true'
-        run: |
-          echo "✅ Enhanced model updated on main branch"
-          echo "🚀 Render will auto-deploy from main branch"
-          echo "📊 Model: Enhanced Gradient Boosting (16 features)"
-          echo "🎯 Target: 84.5% accuracy, 0.93 AUC"
-      
-      - name: Upload pipeline logs
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: pipeline-logs
-          path: auto_pipeline.log
-          retention-days: 30
-      
-      - name: Create summary
+      - name: Summary
         if: always()
         run: |
-          echo "## 🏥 RA Flare Prediction - Enhanced Model Retraining" >> $GITHUB_STEP_SUMMARY
+          echo "## 🎯 Retraining Summary" >> $GITHUB_STEP_SUMMARY
           echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Pipeline Status:** ${{ steps.check_changes.outputs.changed == 'true' && '✅ Model Updated' || '⏭️ No Update Needed' }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          if [ -f "training_metadata.json" ]; then
-            echo "### 📊 Model Performance" >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`json" >> $GITHUB_STEP_SUMMARY
-            cat training_metadata.json >> $GITHUB_STEP_SUMMARY
-            echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          
+          if [ -f "model_metadata.json" ]; then
+            echo "### ✅ Model Training Successful" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            python -c "
+          import json
+          with open('model_metadata.json', 'r') as f:
+              metadata = json.load(f)
+          metrics = metadata['metrics']
+          print(f\"| Metric | Value |\")
+          print(f\"|--------|-------|\")
+          print(f\"| **Accuracy** | {metrics['test_accuracy']:.4f} |\")
+          print(f\"| **F1 Score** | {metrics['f1_score']:.4f} |\")
+          print(f\"| **AUC-ROC** | {metrics['auc']:.4f} |\")
+          print(f\"| **Features** | {metadata['n_features']} |\")
+          print(f\"| **Training Samples** | {metrics['train_samples']} |\")
+          print(f\"| **Test Samples** | {metrics['test_samples']} |\")
+          print(f\"\")
+          print(f\"### 🔬 Feature List\")
+          print(f\"{', '.join(metadata['feature_names'])}\")
+            " >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### ❌ Model Training Failed" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "Check the workflow logs for details." >> $GITHUB_STEP_SUMMARY
           fi

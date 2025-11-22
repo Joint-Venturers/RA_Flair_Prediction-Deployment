@@ -1,29 +1,37 @@
-# Enhanced RA Flare Prediction API with Analytics & User-Linked Predictions
-# Version 2.1.0 - Includes user profile integration
+# Enhanced RA Flare Prediction API with Analytics & 14 Features
+# Version 3.0.0 - Episode history tracking with comprehensive analytics
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
-from typing import List, Optional, Dict
+from pydantic import BaseModel, Field
+from typing import List, Optional, Dict, Any
 import joblib
 import numpy as np
+import json
 from datetime import datetime, timedelta
 import os
 from supabase import create_client, Client
-from analytics_helper import (
-    get_feature_importance,
-    load_training_metadata,
-    calculate_trigger_statistics,
-    analyze_trigger_combinations,
-    calculate_trigger_impact,
-    get_model_insights
-)
+
+# Try to import analytics helper - gracefully handle if not present
+try:
+    from analytics_helper import (
+        get_feature_importance,
+        load_training_metadata,
+        calculate_trigger_statistics,
+        analyze_trigger_combinations,
+        calculate_trigger_impact,
+        get_model_insights
+    )
+    ANALYTICS_HELPER_AVAILABLE = True
+except ImportError:
+    print("[WARN] analytics_helper.py not found - using built-in analytics")
+    ANALYTICS_HELPER_AVAILABLE = False
 
 # Initialize FastAPI app
 app = FastAPI(
-    title="RA Flare Prediction API - Enhanced",
-    description="Machine Learning API for predicting rheumatoid arthritis flares with personalized trigger identification, comprehensive analytics, and user profile integration",
-    version="2.1.0"
+    title="RA Flare Prediction API - Enhanced with Episode History",
+    description="ML API for predicting RA flares with 14 features including episode history tracking, comprehensive analytics, and user profile integration",
+    version="3.0.0"
 )
 
 # CORS middleware
@@ -37,9 +45,9 @@ app.add_middleware(
 
 # Initialize Supabase client
 SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY")
-
+SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_KEY") or os.getenv("SUPABASE_KEY")
 supabase: Client = None
+
 if SUPABASE_URL and SUPABASE_SERVICE_KEY:
     try:
         supabase = create_client(SUPABASE_URL, SUPABASE_SERVICE_KEY)
@@ -51,878 +59,676 @@ else:
 
 # Load ML model and components
 try:
-    model = joblib.load('ra_model_gradient_boosting.pkl')
-    scaler = joblib.load('ra_scaler_gradient_boosting.pkl')
-    feature_names = joblib.load('ra_features_gradient_boosting.pkl')
-    model_type = joblib.load('ra_model_type.pkl')
+    model = joblib.load('ra_flare_model.pkl')
+    scaler = joblib.load('scaler.pkl')
+    
+    # Load metadata
+    with open('model_metadata.json', 'r') as f:
+        MODEL_METADATA = json.load(f)
+    
+    feature_names = MODEL_METADATA.get('feature_names', [])
+    model_type = MODEL_METADATA.get('model_type', 'gradient_boosting')
+    
     print(f"[OK] Loaded {model_type} model with {len(feature_names)} features")
 except Exception as e:
     print(f"[ERROR] Failed to load model: {e}")
     model = None
     scaler = None
-    feature_names = None
+    feature_names = []
     model_type = None
+    MODEL_METADATA = {}
 
-# ============================================================
-# DATA MODELS
-# ============================================================
+# Define the 14 essential features (MUST MATCH TRAINING ORDER)
+FEATURE_COLUMNS = [
+    'age',
+    'sex',
+    'disease_duration',
+    'bmi',
+    'sleep_hours',
+    'smoking_status',
+    'air_quality_index',
+    'min_temperature',
+    'max_temperature',
+    'humidity',
+    'change_in_barometric_pressure',
+    'current_pain_score',
+    'last_episode_duration',
+    'days_since_last_episode'
+]
 
-class PatientData(BaseModel):
-    age: float
-    sex: int
-    disease_duration: float
-    bmi: float
-    sleep_hours: float
-    smoking_status: int
-    air_quality_index: float
-    min_temperature: float
-    max_temperature: float
-    humidity: float
-    barometric_pressure: float
-    precipitation: float
-    wind_speed: float
-    current_pain_score: float
-    tender_joint_count: int
-    swollen_joint_count: int
-    user_id: Optional[str] = None  # NEW: Optional user UUID
-
-
-class BatchPredictionRequest(BaseModel):
-    predictions: List[PatientData]
-
-# ============================================================
-# HELPER FUNCTIONS
-# ============================================================
-
-async def log_prediction_to_supabase(result: dict, input_data: dict, user_id: Optional[str] = None):
-    """Log prediction to Supabase for analytics with user linkage"""
-    if not supabase:
-        return False
+# Pydantic model for prediction input (14 features)
+class PredictionInput(BaseModel):
+    # Demographics
+    age: int = Field(..., ge=18, le=100, description="Age in years")
+    sex: int = Field(..., ge=0, le=1, description="Sex (0: Female, 1: Male)")
+    disease_duration: float = Field(..., ge=0, le=50, description="Years since RA diagnosis")
     
-    try:
-        prediction_log = {
-            'prediction': int(result['inflammation_prediction']),
-            'probability': float(result['inflammation_probability']),
-            'confidence': float(result.get('confidence', 0.0)),
-            'risk_level': result['risk_level'],
-            'triggers': result.get('personalized_triggers', []),
-            'features': input_data,
-            'user_id': user_id,  # Link to user profile
-            'timestamp': datetime.now().isoformat()
+    # Body metrics
+    bmi: float = Field(..., ge=10, le=60, description="Body Mass Index")
+    
+    # Lifestyle
+    sleep_hours: float = Field(..., ge=0, le=24, description="Sleep hours per night")
+    smoking_status: int = Field(..., ge=0, le=2, description="Smoking status (0: No, 1: Yes, 2: Quit)")
+    
+    # Environmental
+    air_quality_index: float = Field(..., ge=0, le=500, description="Air Quality Index")
+    min_temperature: float = Field(..., ge=-30, le=50, description="Minimum temperature (°C)")
+    max_temperature: float = Field(..., ge=-20, le=55, description="Maximum temperature (°C)")
+    humidity: float = Field(..., ge=0, le=100, description="Humidity percentage")
+    change_in_barometric_pressure: float = Field(..., ge=-30, le=30, description="24-hour pressure change (hPa)")
+    
+    # Clinical
+    current_pain_score: int = Field(..., ge=0, le=10, description="Current pain level (0-10)")
+    last_episode_duration: int = Field(..., ge=0, le=30, description="Duration of last flare (days)")
+    days_since_last_episode: int = Field(..., ge=0, le=180, description="Days since last flare")
+    
+    # Optional
+    user_id: Optional[str] = Field(None, description="User UUID for prediction tracking")
+    
+    class Config:
+        json_schema_extra = {
+            "example": {
+                "age": 45,
+                "sex": 0,
+                "disease_duration": 8,
+                "bmi": 28.5,
+                "sleep_hours": 5.5,
+                "smoking_status": 0,
+                "air_quality_index": 120,
+                "min_temperature": 3,
+                "max_temperature": 10,
+                "humidity": 85,
+                "change_in_barometric_pressure": -12,
+                "current_pain_score": 7,
+                "last_episode_duration": 5,
+                "days_since_last_episode": 14,
+                "user_id": "c9bbde37-fbb2-4dbb-bdd2-db7d91c3a721"
+            }
         }
-        
-        response = supabase.table('predictions').insert(prediction_log).execute()
-        return True
-    except Exception as e:
-        print(f"[WARN] Failed to log prediction: {e}")
-        return False
 
+# Trigger thresholds for personalized trigger identification (10 triggers)
+TRIGGER_THRESHOLDS = {
+    'Poor Sleep': {
+        'feature': 'sleep_hours',
+        'condition': 'lt',
+        'value': 6.0,
+        'severity_high': 5.0,
+        'severity_moderate': 6.0
+    },
+    'Smoking': {
+        'feature': 'smoking_status',
+        'condition': 'eq',
+        'value': 1,
+        'severity_high': 1,
+        'severity_moderate': 1
+    },
+    'Elevated BMI': {
+        'feature': 'bmi',
+        'condition': 'gt',
+        'value': 27.0,
+        'severity_high': 30.0,
+        'severity_moderate': 27.0
+    },
+    'Poor Air Quality': {
+        'feature': 'air_quality_index',
+        'condition': 'gt',
+        'value': 100,
+        'severity_high': 150,
+        'severity_moderate': 100
+    },
+    'High Humidity': {
+        'feature': 'humidity',
+        'condition': 'gt',
+        'value': 70,
+        'severity_high': 80,
+        'severity_moderate': 70
+    },
+    'Cold Weather': {
+        'feature': 'min_temperature',
+        'condition': 'lt',
+        'value': 10,
+        'severity_high': 5,
+        'severity_moderate': 10
+    },
+    'Pressure Drop': {
+        'feature': 'change_in_barometric_pressure',
+        'condition': 'lt',
+        'value': -5,
+        'severity_high': -10,
+        'severity_moderate': -5
+    },
+    'Elevated Pain Score': {
+        'feature': 'current_pain_score',
+        'condition': 'gte',
+        'value': 5,
+        'severity_high': 7,
+        'severity_moderate': 5
+    },
+    'Recent Episode': {
+        'feature': 'days_since_last_episode',
+        'condition': 'lt',
+        'value': 30,
+        'severity_high': 14,
+        'severity_moderate': 30
+    },
+    'Long Previous Episode': {
+        'feature': 'last_episode_duration',
+        'condition': 'gt',
+        'value': 7,
+        'severity_high': 14,
+        'severity_moderate': 7
+    }
+}
 
-def identify_triggers(data: dict, feature_importance: dict = None) -> List[dict]:
-    """
-    Identify personalized triggers based on patient data
-    Returns list of triggers with severity and impact scores
-    """
+def identify_triggers(features: Dict[str, Any]) -> List[Dict[str, Any]]:
+    """Identify triggered conditions based on feature values"""
     triggers = []
+    feature_importance = {
+        item['feature']: item['importance'] 
+        for item in MODEL_METADATA.get('metrics', {}).get('feature_importance', [])
+    }
     
-    # Sleep trigger
-    if data['sleep_hours'] < 6:
-        severity = 'high' if data['sleep_hours'] < 5 else 'moderate'
-        triggers.append({
-            'trigger': 'Poor Sleep',
-            'severity': severity,
-            'value': f"{data['sleep_hours']} hours",
-            'threshold': '< 6 hours',
-            'impact_score': 0.25
-        })
+    for trigger_name, config in TRIGGER_THRESHOLDS.items():
+        feature = config['feature']
+        value = features.get(feature)
+        
+        if value is None:
+            continue
+        
+        triggered = False
+        severity = 'low'
+        
+        if config['condition'] == 'lt':
+            if value < config.get('severity_high', config['value']):
+                triggered = True
+                severity = 'high'
+            elif value < config.get('severity_moderate', config['value']):
+                triggered = True
+                severity = 'moderate'
+            elif value < config['value']:
+                triggered = True
+                severity = 'low'
+        elif config['condition'] == 'gt':
+            if value > config.get('severity_high', config['value']):
+                triggered = True
+                severity = 'high'
+            elif value > config.get('severity_moderate', config['value']):
+                triggered = True
+                severity = 'moderate'
+            elif value > config['value']:
+                triggered = True
+                severity = 'low'
+        elif config['condition'] == 'gte':
+            if value >= config.get('severity_high', config['value']):
+                triggered = True
+                severity = 'high'
+            elif value >= config.get('severity_moderate', config['value']):
+                triggered = True
+                severity = 'moderate'
+            elif value >= config['value']:
+                triggered = True
+                severity = 'low'
+        elif config['condition'] == 'eq':
+            if value == config['value']:
+                triggered = True
+                severity = 'high'
+        
+        if triggered:
+            impact_score = feature_importance.get(feature, 0.0)
+            triggers.append({
+                'trigger': trigger_name,
+                'severity': severity,
+                'impact_score': float(impact_score)
+            })
     
-    # Pain score trigger
-    if data['current_pain_score'] > 6:
-        severity = 'high' if data['current_pain_score'] >= 8 else 'moderate'
-        triggers.append({
-            'trigger': 'Elevated Pain Score',
-            'severity': severity,
-            'value': f"{data['current_pain_score']}/10",
-            'threshold': '> 6/10',
-            'impact_score': 0.20
-        })
-    
-    # BMI trigger
-    if data['bmi'] > 30:
-        triggers.append({
-            'trigger': 'Elevated BMI',
-            'severity': 'moderate',
-            'value': f"{data['bmi']}",
-            'threshold': '> 30 (obesity)',
-            'impact_score': 0.15
-        })
-    
-    # Humidity trigger
-    if data['humidity'] > 75:
-        triggers.append({
-            'trigger': 'High Humidity',
-            'severity': 'moderate',
-            'value': f"{data['humidity']}%",
-            'threshold': '> 75%',
-            'impact_score': 0.15
-        })
-    
-    # Barometric pressure trigger
-    if data['barometric_pressure'] < 1000:
-        triggers.append({
-            'trigger': 'Low Barometric Pressure',
-            'severity': 'moderate',
-            'value': f"{data['barometric_pressure']} hPa",
-            'threshold': '< 1000 hPa',
-            'impact_score': 0.15
-        })
-    
-    # Air quality trigger
-    if data['air_quality_index'] > 100:
-        severity = 'high' if data['air_quality_index'] > 150 else 'moderate'
-        triggers.append({
-            'trigger': 'Poor Air Quality',
-            'severity': severity,
-            'value': f"AQI {data['air_quality_index']}",
-            'threshold': '> 100 (unhealthy)',
-            'impact_score': 0.15
-        })
-    
-    # Cold weather trigger
-    if data['min_temperature'] < 10:
-        triggers.append({
-            'trigger': 'Cold Weather',
-            'severity': 'low',
-            'value': f"{data['min_temperature']}°C",
-            'threshold': '< 10°C',
-            'impact_score': 0.10
-        })
-    
-    return triggers
+    return sorted(triggers, key=lambda x: x['impact_score'], reverse=True)
 
+def calculate_confidence(probability: float, triggers: List[Dict]) -> float:
+    """Calculate prediction confidence based on probability and triggers"""
+    trigger_count = len(triggers)
+    high_severity_count = sum(1 for t in triggers if t['severity'] == 'high')
+    
+    # Base confidence from probability
+    if probability > 0.7 or probability < 0.3:
+        base_confidence = 0.85
+    else:
+        base_confidence = 0.65
+    
+    # Increase confidence with more triggers
+    if trigger_count > 0:
+        trigger_confidence = min(0.15, trigger_count * 0.03 + high_severity_count * 0.02)
+        confidence = min(0.95, base_confidence + trigger_confidence)
+    else:
+        confidence = base_confidence
+    
+    return float(confidence)
 
-def generate_recommendations(triggers: List[dict], risk_level: str) -> List[str]:
-    """
-    Generate actionable recommendations based on triggers
-    """
-    recommendations = []
-    
-    # Trigger-specific recommendations
-    trigger_names = [t['trigger'] for t in triggers]
-    
-    if 'Poor Sleep' in trigger_names:
-        recommendations.append("💤 Prioritize sleep hygiene: Aim for 7-9 hours nightly")
-    
-    if 'Elevated BMI' in trigger_names:
-        recommendations.append("🏃 Consider weight management: Consult with nutritionist")
-    
-    if 'Poor Air Quality' in trigger_names:
-        recommendations.append("😷 Limit outdoor exposure when AQI > 100")
-    
-    if any(t in trigger_names for t in ['High Humidity', 'Low Barometric Pressure', 'Cold Weather']):
-        recommendations.append("🌦️ Monitor weather changes: Plan indoor activities")
-        recommendations.append("🧥 Stay warm: Layer clothing, use heating")
-    
-    if 'Elevated Pain Score' in trigger_names:
-        recommendations.append("💊 Review pain management with rheumatologist")
-    
-    # Risk-based recommendations
-    if risk_level == 'high':
-        recommendations.append("⚠️ HIGH RISK: Contact your healthcare provider")
-    
-    # General recommendation
-    recommendations.append("📱 Log symptoms in your RA tracking app")
-    
-    return recommendations
-
-
-def assess_risk_level(probability: float) -> str:
-    """Determine risk level based on probability"""
-    if probability >= 0.7:
+def determine_risk_level(probability: float) -> str:
+    """Determine risk level category"""
+    if probability >= 0.6:
         return 'high'
     elif probability >= 0.4:
         return 'moderate'
     else:
         return 'low'
 
-# ============================================================
-# PREDICTION ENDPOINTS
-# ============================================================
+# ============================================================================
+# ROOT ENDPOINTS
+# ============================================================================
 
 @app.get("/")
-async def root():
-    """API root endpoint"""
+def read_root():
+    """Root endpoint with API information"""
     return {
-        "message": "RA Flare Prediction API - Enhanced v2.1",
-        "model_type": model_type if model_type else "Model not loaded",
-        "features": len(feature_names) if feature_names else 0,
+        "message": "RA Flare Prediction API - Enhanced with 14 Features & Episode History",
+        "version": "3.0.0",
+        "model_type": MODEL_METADATA.get('model_type', 'unknown'),
+        "n_features": len(FEATURE_COLUMNS),
+        "features": FEATURE_COLUMNS,
+        "training_date": MODEL_METADATA.get('training_date', 'unknown'),
         "endpoints": {
-            "predictions": ["/predict", "/predict/batch"],
-            "info": ["/health", "/features"],
-            "analytics": [
-                "/analytics/health",
-                "/analytics/model-performance",
-                "/analytics/feature-importance",
-                "/analytics/trigger-frequency",
-                "/analytics/trigger-combinations",
-                "/analytics/trigger-impact",
-                "/analytics/predictions-summary",
-                "/analytics/training-history",
-                "/analytics/model-insights"
-            ],
-            "user_analytics": [
-                "/analytics/user/{user_id}/predictions",
-                "/analytics/user/{user_id}/triggers",
-                "/analytics/user/{user_id}/summary"
-            ]
-        },
-        "version": "2.1.0",
-        "status": "operational"
+            "/predict": "POST - Make a prediction",
+            "/health": "GET - Health check",
+            "/model-info": "GET - Model information",
+            "/analytics/overview": "GET - System overview",
+            "/analytics/model-performance": "GET - Model metrics",
+            "/analytics/triggers": "GET - Trigger analysis",
+            "/analytics/user-insights": "POST - User-specific insights",
+            "/analytics/feature-importance": "GET - Feature importance",
+            "/analytics/trigger-combinations": "GET - Trigger combination analysis"
+        }
     }
 
-
 @app.get("/health")
-async def health_check():
+def health_check():
     """Health check endpoint"""
-    model_loaded = model is not None
     return {
-        "status": "healthy" if model_loaded else "unhealthy",
-        "model_loaded": model_loaded,
-        "model_type": model_type if model_type else None,
-        "features": len(feature_names) if feature_names else 0,
+        "status": "healthy",
+        "model_loaded": model is not None,
+        "scaler_loaded": scaler is not None,
         "supabase_connected": supabase is not None,
+        "n_features": len(FEATURE_COLUMNS),
+        "analytics_helper": ANALYTICS_HELPER_AVAILABLE,
         "timestamp": datetime.now().isoformat()
     }
 
-
-@app.get("/features")
-async def get_features():
-    """Get list of features used by the model"""
-    if not feature_names:
-        raise HTTPException(status_code=503, detail="Model not loaded")
-    
+@app.get("/model-info")
+def model_info():
+    """Get model information and metadata"""
     return {
-        "features": feature_names,
-        "count": len(feature_names),
-        "model_type": model_type
+        "model_metadata": MODEL_METADATA,
+        "feature_columns": FEATURE_COLUMNS,
+        "required_features": len(FEATURE_COLUMNS),
+        "trigger_thresholds": TRIGGER_THRESHOLDS,
+        "feature_descriptions": {
+            'age': 'Patient age in years',
+            'sex': 'Biological sex (0: Female, 1: Male)',
+            'disease_duration': 'Years since RA diagnosis',
+            'bmi': 'Body Mass Index (kg/m²)',
+            'sleep_hours': 'Average sleep duration per night',
+            'smoking_status': 'Smoking status (0: No, 1: Yes, 2: Quit)',
+            'air_quality_index': 'Air Quality Index (0-500)',
+            'min_temperature': 'Minimum temperature (°C)',
+            'max_temperature': 'Maximum temperature (°C)',
+            'humidity': 'Relative humidity (%)',
+            'change_in_barometric_pressure': '24-hour pressure change (hPa)',
+            'current_pain_score': 'Pain level (0-10)',
+            'last_episode_duration': 'Duration of last flare (days)',
+            'days_since_last_episode': 'Days since last flare'
+        }
     }
 
+# ============================================================================
+# PREDICTION ENDPOINT
+# ============================================================================
 
 @app.post("/predict")
-async def predict(data: PatientData):
-    """
-    Single prediction endpoint with personalized trigger identification
-    Supports optional user_id for user-linked predictions
-    """
-    if not model or not scaler:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+def predict(input_data: PredictionInput):
+    """Make a flare prediction based on 14 essential features"""
+    
+    if model is None or scaler is None:
+        raise HTTPException(status_code=500, detail="Model not loaded")
     
     try:
-        # Prepare features
-        features = np.array([[
-            data.age,
-            data.sex,
-            data.disease_duration,
-            data.bmi,
-            data.sleep_hours,
-            data.smoking_status,
-            data.air_quality_index,
-            data.min_temperature,
-            data.max_temperature,
-            data.humidity,
-            data.barometric_pressure,
-            data.precipitation,
-            data.wind_speed,
-            data.current_pain_score,
-            data.tender_joint_count,
-            data.swollen_joint_count
-        ]])
+        # Extract features in correct order
+        features_dict = {
+            'age': input_data.age,
+            'sex': input_data.sex,
+            'disease_duration': input_data.disease_duration,
+            'bmi': input_data.bmi,
+            'sleep_hours': input_data.sleep_hours,
+            'smoking_status': input_data.smoking_status,
+            'air_quality_index': input_data.air_quality_index,
+            'min_temperature': input_data.min_temperature,
+            'max_temperature': input_data.max_temperature,
+            'humidity': input_data.humidity,
+            'change_in_barometric_pressure': input_data.change_in_barometric_pressure,
+            'current_pain_score': input_data.current_pain_score,
+            'last_episode_duration': input_data.last_episode_duration,
+            'days_since_last_episode': input_data.days_since_last_episode
+        }
         
-        # Scale and predict
+        # Create feature array in correct order
+        features = np.array([[features_dict[col] for col in FEATURE_COLUMNS]])
+        
+        # Scale features
         features_scaled = scaler.transform(features)
+        
+        # Make prediction
         prediction = int(model.predict(features_scaled)[0])
         probability = float(model.predict_proba(features_scaled)[0][1])
         
-        # Calculate confidence
-        confidence = abs(probability - 0.5) * 2
-        
-        # Assess risk level
-        risk_level = assess_risk_level(probability)
-        
         # Identify triggers
-        data_dict = data.dict()
-        triggers = identify_triggers(data_dict)
+        triggers = identify_triggers(features_dict)
         
-        # Generate recommendations
-        recommendations = generate_recommendations(triggers, risk_level)
+        # Calculate confidence and risk level
+        confidence = calculate_confidence(probability, triggers)
+        risk_level = determine_risk_level(probability)
         
-        # Prepare result
-        result = {
-            "inflammation_prediction": prediction,
-            "inflammation_probability": probability,
-            "confidence": confidence,
+        # Prepare response
+        response = {
+            "prediction": prediction,
+            "probability": round(probability, 4),
+            "confidence": round(confidence, 4),
             "risk_level": risk_level,
-            "personalized_triggers": triggers,
-            "recommendations": recommendations,
-            "timestamp": datetime.now().isoformat()
+            "triggers": triggers,
+            "timestamp": datetime.now().isoformat(),
+            "model_version": MODEL_METADATA.get('model_type', 'unknown'),
+            "n_features": len(FEATURE_COLUMNS)
         }
         
-        # Log prediction to Supabase with user linkage
-        await log_prediction_to_supabase(result, data_dict, data.user_id)
+        # Save to Supabase if available
+        if supabase and input_data.user_id:
+            try:
+                prediction_record = {
+                    'timestamp': response['timestamp'],
+                    'prediction': prediction,
+                    'probability': probability,
+                    'confidence': confidence,
+                    'risk_level': risk_level,
+                    'triggers': json.dumps(triggers),
+                    'features': json.dumps(features_dict),
+                    'user_id': input_data.user_id
+                }
+                supabase.table('predictions').insert(prediction_record).execute()
+            except Exception as e:
+                print(f"[WARN] Could not save to Supabase: {e}")
         
-        return result
+        return response
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
 
+# ============================================================================
+# ANALYTICS ENDPOINTS
+# ============================================================================
 
-@app.post("/predict/batch")
-async def predict_batch(request: BatchPredictionRequest):
-    """
-    Batch prediction endpoint
-    Supports optional user_id for each patient
-    """
-    if not model or not scaler:
-        raise HTTPException(status_code=503, detail="Model not loaded")
+@app.get("/analytics/overview")
+def analytics_overview():
+    """Get system-wide analytics overview"""
+    
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
     
     try:
-        results = []
-        high_risk_count = 0
+        # Get predictions from last 30 days
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
         
-        for patient_data in request.predictions:
-            # Prepare features
-            features = np.array([[
-                patient_data.age,
-                patient_data.sex,
-                patient_data.disease_duration,
-                patient_data.bmi,
-                patient_data.sleep_hours,
-                patient_data.smoking_status,
-                patient_data.air_quality_index,
-                patient_data.min_temperature,
-                patient_data.max_temperature,
-                patient_data.humidity,
-                patient_data.barometric_pressure,
-                patient_data.precipitation,
-                patient_data.wind_speed,
-                patient_data.current_pain_score,
-                patient_data.tender_joint_count,
-                patient_data.swollen_joint_count
-            ]])
-            
-            # Scale and predict
-            features_scaled = scaler.transform(features)
-            prediction = int(model.predict(features_scaled)[0])
-            probability = float(model.predict_proba(features_scaled)[0][1])
-            
-            # Calculate confidence
-            confidence = abs(probability - 0.5) * 2
-            
-            # Assess risk level
-            risk_level = assess_risk_level(probability)
-            
-            if risk_level == 'high':
-                high_risk_count += 1
-            
-            # Identify triggers
-            data_dict = patient_data.dict()
-            triggers = identify_triggers(data_dict)
-            
-            # Generate recommendations
-            recommendations = generate_recommendations(triggers, risk_level)
-            
-            # Prepare result
-            result = {
-                "inflammation_prediction": prediction,
-                "inflammation_probability": probability,
-                "confidence": confidence,
-                "risk_level": risk_level,
-                "personalized_triggers": triggers,
-                "recommendations": recommendations,
-                "timestamp": datetime.now().isoformat()
+        predictions = supabase.table('predictions')\
+            .select('*')\
+            .gte('timestamp', thirty_days_ago)\
+            .execute()
+        
+        if not predictions.data:
+            return {
+                "total_predictions": 0,
+                "flare_rate": 0,
+                "high_risk_count": 0,
+                "avg_confidence": 0,
+                "period_days": 30
             }
-            
-            # Log prediction to Supabase with user linkage
-            await log_prediction_to_supabase(result, data_dict, patient_data.user_id)
-            
-            results.append(result)
+        
+        total = len(predictions.data)
+        flares = sum(1 for p in predictions.data if p['prediction'] == 1)
+        high_risk = sum(1 for p in predictions.data if p['risk_level'] == 'high')
+        avg_confidence = sum(p['confidence'] for p in predictions.data) / total if total > 0 else 0
         
         return {
-            "results": results,
-            "total_count": len(results),
-            "high_risk_count": high_risk_count,
-            "timestamp": datetime.now().isoformat()
+            "total_predictions": total,
+            "flare_rate": round(flares / total if total > 0 else 0, 4),
+            "high_risk_count": high_risk,
+            "avg_confidence": round(avg_confidence, 4),
+            "period_days": 30
         }
         
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
-
-
-# ============================================================
-# ANALYTICS ENDPOINTS - SYSTEM LEVEL
-# ============================================================
-
-@app.get("/analytics/health")
-async def analytics_health():
-    """Check analytics system health"""
-    return {
-        "status": "healthy",
-        "supabase_connected": supabase is not None,
-        "model_loaded": os.path.exists('ra_model_gradient_boosting.pkl'),
-        "metadata_available": os.path.exists('training_metadata.json'),
-        "timestamp": datetime.now().isoformat()
-    }
-
+        raise HTTPException(status_code=500, detail=f"Analytics error: {str(e)}")
 
 @app.get("/analytics/model-performance")
-async def get_model_performance():
-    """Get current model performance metrics"""
-    try:
-        metadata = load_training_metadata()
-        
-        if not metadata:
+def model_performance():
+    """Get model performance metrics"""
+    
+    if ANALYTICS_HELPER_AVAILABLE:
+        try:
+            # Use analytics helper if available
+            training_metadata = load_training_metadata()
+            insights = get_model_insights()
             return {
-                "error": "Model metadata not found",
-                "message": "Train the model first"
+                "model_type": MODEL_METADATA.get('model_type', 'unknown'),
+                "metrics": MODEL_METADATA.get('metrics', {}),
+                "n_features": MODEL_METADATA.get('n_features', 14),
+                "training_date": MODEL_METADATA.get('training_date', 'unknown'),
+                "insights": insights,
+                "training_history": training_metadata
             }
-        
-        return {
-            "model_performance": {
-                "accuracy": metadata.get('accuracy', 0),
-                "f1_score": metadata.get('f1', 0),
-                "auc": metadata.get('auc', 0),
-                "training_date": metadata.get('timestamp', ''),
-                "model_type": metadata.get('model_type', 'unknown'),
-                "total_features": metadata.get('n_features', 0),
-                "training_samples": metadata.get('training_samples', 0),
-                "test_samples": metadata.get('test_samples', 0)
-            },
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        return {"error": str(e)}
+        except:
+            pass
+    
+    # Fallback to basic metadata
+    return {
+        "model_type": MODEL_METADATA.get('model_type', 'unknown'),
+        "metrics": MODEL_METADATA.get('metrics', {}),
+        "n_features": MODEL_METADATA.get('n_features', 14),
+        "training_date": MODEL_METADATA.get('training_date', 'unknown')
+    }
 
+@app.get("/analytics/triggers")
+def trigger_analysis():
+    """Get trigger frequency analysis"""
+    
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+        
+        predictions = supabase.table('predictions')\
+            .select('triggers, prediction')\
+            .gte('timestamp', thirty_days_ago)\
+            .execute()
+        
+        if not predictions.data:
+            return {"triggers": []}
+        
+        # Count trigger occurrences
+        trigger_counts = {}
+        for pred in predictions.data:
+            if pred.get('triggers'):
+                triggers_list = json.loads(pred['triggers']) if isinstance(pred['triggers'], str) else pred['triggers']
+                for trigger in triggers_list:
+                    trigger_name = trigger['trigger']
+                    if trigger_name not in trigger_counts:
+                        trigger_counts[trigger_name] = {
+                            'count': 0,
+                            'severities': {'high': 0, 'moderate': 0, 'low': 0},
+                            'flare_correlation': 0
+                        }
+                    trigger_counts[trigger_name]['count'] += 1
+                    trigger_counts[trigger_name]['severities'][trigger['severity']] += 1
+                    if pred['prediction'] == 1:
+                        trigger_counts[trigger_name]['flare_correlation'] += 1
+        
+        # Format response
+        triggers = [
+            {
+                'trigger': name,
+                'count': data['count'],
+                'frequency': round(data['count'] / len(predictions.data), 4),
+                'severities': data['severities'],
+                'flare_correlation': round(data['flare_correlation'] / data['count'] if data['count'] > 0 else 0, 4)
+            }
+            for name, data in trigger_counts.items()
+        ]
+        
+        return {"triggers": sorted(triggers, key=lambda x: x['count'], reverse=True)}
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Trigger analysis error: {str(e)}")
 
 @app.get("/analytics/feature-importance")
-async def get_feature_importance_endpoint():
-    """Get feature importance rankings with categories"""
-    try:
-        feature_data = get_feature_importance()
-        
-        if 'error' in feature_data:
-            return {
-                "error": "Failed to load feature importance",
-                "details": feature_data.get('error', '')
-            }
-        
-        return feature_data
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/analytics/trigger-frequency")
-async def get_trigger_frequency(days: Optional[int] = 30):
-    """Get trigger frequency statistics for the last N days"""
-    try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
-            }
-        
-        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
-        
-        response = supabase.table('predictions')\
-            .select('*')\
-            .gte('timestamp', cutoff_date)\
-            .execute()
-        
-        predictions = response.data if response.data else []
-        
-        if not predictions:
-            return {
-                "message": f"No predictions found in the last {days} days",
-                "total_predictions": 0,
-                "time_period": f"last_{days}_days"
-            }
-        
-        stats = calculate_trigger_statistics(predictions)
-        stats['time_period'] = f"last_{days}_days"
-        
-        return stats
-    except Exception as e:
-        return {"error": str(e)}
-
+def feature_importance():
+    """Get feature importance rankings"""
+    
+    if ANALYTICS_HELPER_AVAILABLE:
+        try:
+            importance = get_feature_importance()
+            return {"feature_importance": importance}
+        except:
+            pass
+    
+    # Fallback to metadata
+    return {
+        "feature_importance": MODEL_METADATA.get('metrics', {}).get('feature_importance', [])
+    }
 
 @app.get("/analytics/trigger-combinations")
-async def get_trigger_combinations(days: Optional[int] = 30):
+def trigger_combinations():
     """Analyze common trigger combinations"""
+    
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
     try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
+        if ANALYTICS_HELPER_AVAILABLE:
+            combinations = analyze_trigger_combinations()
+            return {"combinations": combinations}
+        
+        # Basic combination analysis
+        thirty_days_ago = (datetime.now() - timedelta(days=30)).isoformat()
+        
+        predictions = supabase.table('predictions')\
+            .select('triggers, prediction')\
+            .gte('timestamp', thirty_days_ago)\
+            .execute()
+        
+        if not predictions.data:
+            return {"combinations": []}
+        
+        # Count co-occurrences
+        combo_counts = {}
+        for pred in predictions.data:
+            if pred.get('triggers'):
+                triggers_list = json.loads(pred['triggers']) if isinstance(pred['triggers'], str) else pred['triggers']
+                trigger_names = sorted([t['trigger'] for t in triggers_list])
+                
+                if len(trigger_names) >= 2:
+                    combo = ' + '.join(trigger_names)
+                    if combo not in combo_counts:
+                        combo_counts[combo] = {'count': 0, 'flares': 0}
+                    combo_counts[combo]['count'] += 1
+                    if pred['prediction'] == 1:
+                        combo_counts[combo]['flares'] += 1
+        
+        combinations = [
+            {
+                'combination': combo,
+                'count': data['count'],
+                'flare_rate': round(data['flares'] / data['count'] if data['count'] > 0 else 0, 4)
             }
+            for combo, data in combo_counts.items()
+        ]
         
-        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
+        return {"combinations": sorted(combinations, key=lambda x: x['count'], reverse=True)[:10]}
         
-        response = supabase.table('predictions')\
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Combination analysis error: {str(e)}")
+
+# User insights endpoint
+class UserInsightsRequest(BaseModel):
+    user_id: str
+    days: Optional[int] = 30
+
+@app.post("/analytics/user-insights")
+def user_insights(request: UserInsightsRequest):
+    """Get comprehensive insights for a specific user"""
+    
+    if not supabase:
+        raise HTTPException(status_code=503, detail="Database not available")
+    
+    try:
+        # Get user predictions
+        cutoff_date = (datetime.now() - timedelta(days=request.days)).isoformat()
+        
+        predictions = supabase.table('predictions')\
             .select('*')\
+            .eq('user_id', request.user_id)\
             .gte('timestamp', cutoff_date)\
-            .execute()
-        
-        predictions = response.data if response.data else []
-        
-        if not predictions:
-            return {
-                "message": f"No predictions found in the last {days} days",
-                "total_predictions": 0
-            }
-        
-        combinations = analyze_trigger_combinations(predictions)
-        combinations['time_period'] = f"last_{days}_days"
-        
-        return combinations
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/analytics/trigger-impact")
-async def get_trigger_impact(days: Optional[int] = 30):
-    """Calculate individual trigger impact on flare predictions"""
-    try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
-            }
-        
-        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
-        
-        response = supabase.table('predictions')\
-            .select('*')\
-            .gte('timestamp', cutoff_date)\
-            .execute()
-        
-        predictions = response.data if response.data else []
-        
-        if not predictions:
-            return {
-                "message": f"No predictions found in the last {days} days",
-                "total_predictions": 0
-            }
-        
-        impact_data = calculate_trigger_impact(predictions)
-        impact_data['time_period'] = f"last_{days}_days"
-        
-        return impact_data
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/analytics/predictions-summary")
-async def get_predictions_summary(days: Optional[int] = 30):
-    """Get summary statistics for predictions"""
-    try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
-            }
-        
-        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
-        
-        response = supabase.table('predictions')\
-            .select('*')\
-            .gte('timestamp', cutoff_date)\
-            .execute()
-        
-        predictions = response.data if response.data else []
-        
-        if not predictions:
-            return {
-                "message": f"No predictions found in the last {days} days",
-                "total_predictions": 0,
-                "time_period": f"last_{days}_days"
-            }
-        
-        total = len(predictions)
-        flares = sum(1 for p in predictions if p.get('prediction') == 1)
-        flare_rate = round((flares / total) * 100, 1) if total > 0 else 0
-        
-        risk_levels = {}
-        for p in predictions:
-            level = p.get('risk_level', 'unknown')
-            risk_levels[level] = risk_levels.get(level, 0) + 1
-        
-        avg_prob = round(
-            sum(p.get('probability', 0) for p in predictions) / total,
-            3
-        ) if total > 0 else 0
-        
-        return {
-            "time_period": f"last_{days}_days",
-            "total_predictions": total,
-            "flare_count": flares,
-            "flare_rate_percentage": flare_rate,
-            "risk_distribution": risk_levels,
-            "average_probability": avg_prob,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/analytics/training-history")
-async def get_training_history(limit: Optional[int] = 10):
-    """Get training history from Supabase"""
-    try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
-            }
-        
-        response = supabase.table('training_history')\
-            .select('*')\
-            .order('timestamp', desc=True)\
-            .limit(limit)\
-            .execute()
-        
-        training_runs = response.data if response.data else []
-        
-        if not training_runs:
-            return {
-                "message": "No training history found",
-                "training_runs": []
-            }
-        
-        return {
-            "total_runs": len(training_runs),
-            "training_runs": training_runs,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/analytics/model-insights")
-async def get_model_insights_endpoint():
-    """Get combined model performance + feature importance insights"""
-    try:
-        insights = get_model_insights()
-        
-        if 'error' in insights:
-            return {
-                "error": "Failed to load model insights",
-                "details": insights.get('error', '')
-            }
-        
-        return insights
-    except Exception as e:
-        return {"error": str(e)}
-
-
-# ============================================================
-# ANALYTICS ENDPOINTS - USER SPECIFIC
-# ============================================================
-
-@app.get("/analytics/user/{user_id}/predictions")
-async def get_user_predictions(user_id: str, limit: Optional[int] = 50):
-    """
-    Get prediction history for a specific user
-    
-    Path Parameters:
-    - user_id: UUID of the user
-    
-    Query Parameters:
-    - limit: Number of predictions to retrieve (default: 50)
-    """
-    try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
-            }
-        
-        response = supabase.table('predictions')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .order('timestamp', desc=True)\
-            .limit(limit)\
-            .execute()
-        
-        predictions = response.data if response.data else []
-        
-        if not predictions:
-            return {
-                "message": f"No predictions found for user {user_id}",
-                "user_id": user_id,
-                "predictions": []
-            }
-        
-        # Calculate user-specific statistics
-        total = len(predictions)
-        flares = sum(1 for p in predictions if p.get('prediction') == 1)
-        flare_rate = round((flares / total) * 100, 1) if total > 0 else 0
-        
-        # Risk level distribution
-        risk_levels = {}
-        for p in predictions:
-            level = p.get('risk_level', 'unknown')
-            risk_levels[level] = risk_levels.get(level, 0) + 1
-        
-        # Average probability
-        avg_prob = round(
-            sum(p.get('probability', 0) for p in predictions) / total,
-            3
-        ) if total > 0 else 0
-        
-        return {
-            "user_id": user_id,
-            "total_predictions": total,
-            "flare_count": flares,
-            "flare_rate_percentage": flare_rate,
-            "risk_distribution": risk_levels,
-            "average_probability": avg_prob,
-            "predictions": predictions,
-            "timestamp": datetime.now().isoformat()
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/analytics/user/{user_id}/triggers")
-async def get_user_triggers(user_id: str, days: Optional[int] = 30):
-    """
-    Get trigger frequency for a specific user
-    
-    Path Parameters:
-    - user_id: UUID of the user
-    
-    Query Parameters:
-    - days: Number of days to analyze (default: 30)
-    """
-    try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
-            }
-        
-        # Query user's predictions from last N days
-        cutoff_date = (datetime.now() - timedelta(days=days)).isoformat()
-        
-        response = supabase.table('predictions')\
-            .select('*')\
-            .eq('user_id', user_id)\
-            .gte('timestamp', cutoff_date)\
-            .execute()
-        
-        predictions = response.data if response.data else []
-        
-        if not predictions:
-            return {
-                "message": f"No predictions found for user in the last {days} days",
-                "user_id": user_id,
-                "total_predictions": 0
-            }
-        
-        # Calculate trigger statistics
-        stats = calculate_trigger_statistics(predictions)
-        stats['user_id'] = user_id
-        stats['time_period'] = f"last_{days}_days"
-        
-        return stats
-    except Exception as e:
-        return {"error": str(e)}
-
-
-@app.get("/analytics/user/{user_id}/summary")
-async def get_user_summary(user_id: str):
-    """
-    Get comprehensive summary for a user
-    
-    Path Parameters:
-    - user_id: UUID of the user
-    
-    Returns:
-    - User profile information
-    - Prediction statistics
-    - Most common triggers
-    - Risk trends
-    """
-    try:
-        if not supabase:
-            return {
-                "error": "Supabase not configured",
-                "message": "Analytics database unavailable"
-            }
-        
-        # Get user profile
-        profile_response = supabase.table('profiles')\
-            .select('*')\
-            .eq('id', user_id)\
-            .single()\
-            .execute()
-        
-        profile = profile_response.data if profile_response.data else {}
-        
-        # Get all user predictions
-        predictions_response = supabase.table('predictions')\
-            .select('*')\
-            .eq('user_id', user_id)\
             .order('timestamp', desc=True)\
             .execute()
         
-        predictions = predictions_response.data if predictions_response.data else []
+        if not predictions.data:
+            raise HTTPException(status_code=404, detail="No predictions found for user")
         
-        if not predictions:
-            return {
-                "user_id": user_id,
-                "profile": profile,
-                "message": "No predictions found for this user",
-                "statistics": {}
-            }
-        
-        # Calculate statistics
-        total = len(predictions)
-        flares = sum(1 for p in predictions if p.get('prediction') == 1)
-        flare_rate = round((flares / total) * 100, 1) if total > 0 else 0
+        total = len(predictions.data)
+        flares = sum(1 for p in predictions.data if p['prediction'] == 1)
         
         # Get recent predictions (last 10)
-        recent_predictions = predictions[:10]
+        recent = predictions.data[:10]
         
-        # Calculate trigger statistics
-        trigger_stats = calculate_trigger_statistics(predictions)
+        # Count user-specific triggers
+        trigger_counts = {}
+        for pred in predictions.data:
+            if pred.get('triggers'):
+                triggers_list = json.loads(pred['triggers']) if isinstance(pred['triggers'], str) else pred['triggers']
+                for trigger in triggers_list:
+                    trigger_name = trigger['trigger']
+                    if trigger_name not in trigger_counts:
+                        trigger_counts[trigger_name] = {'count': 0, 'with_flare': 0}
+                    trigger_counts[trigger_name]['count'] += 1
+                    if pred['prediction'] == 1:
+                        trigger_counts[trigger_name]['with_flare'] += 1
+        
+        top_triggers = sorted(
+            [
+                {
+                    'trigger': k,
+                    'count': v['count'],
+                    'flare_correlation': round(v['with_flare'] / v['count'] if v['count'] > 0 else 0, 4)
+                }
+                for k, v in trigger_counts.items()
+            ],
+            key=lambda x: x['count'],
+            reverse=True
+        )[:5]
         
         return {
-            "user_id": user_id,
-            "profile": {
-                "is_doctor": profile.get('is_doctor', False),
-                "diagnosis_date": profile.get('diagnosis_date'),
-                "sex": profile.get('sex'),
-                "birth_date": profile.get('birth_date'),
-                "height_cm": profile.get('height_cm'),
-                "weight_kg": profile.get('weight_kg')
-            },
-            "statistics": {
-                "total_predictions": total,
-                "flare_count": flares,
-                "flare_rate_percentage": flare_rate,
-                "most_recent_prediction": recent_predictions[0] if recent_predictions else None
-            },
-            "top_triggers": trigger_stats.get('trigger_counts', {}),
-            "recent_predictions": recent_predictions,
-            "timestamp": datetime.now().isoformat()
+            "user_id": request.user_id,
+            "period_days": request.days,
+            "total_predictions": total,
+            "flare_count": flares,
+            "flare_rate": round(flares / total if total > 0 else 0, 4),
+            "top_triggers": top_triggers,
+            "recent_predictions": recent
         }
+        
+    except HTTPException:
+        raise
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=f"User insights error: {str(e)}")
 
-
-# ============================================================
+# ============================================================================
 # RUN SERVER
-# ============================================================
+# ============================================================================
 
 if __name__ == "__main__":
     import uvicorn
