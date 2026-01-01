@@ -57,7 +57,7 @@
     "last_episode_duration": "Duration of last flare episode in days",
     "days_since_last_episode": "Days since last inflammation episode"
   },
-  "training_date": "2025-12-01T03:51:05.135264",
+  "training_date": "2026-01-01T03:50:11.497231",
   "metrics": {
     "train_accuracy": 0.8845833333333334,
     "test_accuracy": 0.8166666666666667,
